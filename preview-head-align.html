@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-mode="after">
+<head>
+<meta charset="utf-8">
+<title>Title 条 vs 内容区 · 几何对照</title>
+<style>
+/* ── 模拟 DSH 主题 token（面板 CSS 读的是宿主的这些变量）───────────── */
+:root{
+  --dsw-font-family:-apple-system,"PingFang SC",system-ui,sans-serif;
+  --dsw-font-mono:ui-monospace,SFMono-Regular,monospace;
+  --dsw-font-xs-13:400 13px/20px var(--dsw-font-family);
+  --dsw-font-xs-strong-13:600 13px/20px var(--dsw-font-family);
+  --dsw-font-xxs-12:400 12px/18px var(--dsw-font-family);
+  --dsw-font-xxs-strong-12:600 12px/18px var(--dsw-font-family);
+  --dsw-font-xxxs-11:400 11px/16px var(--dsw-font-family);
+  --dsw-font-xxxs-strong-11:600 11px/16px var(--dsw-font-family);
+  --dsw-alias-label-primary:#1c1f23;
+  --dsw-alias-label-secondary:#4a5158;
+  --dsw-alias-label-tertiary:#7b838c;
+  --dsw-alias-label-caption:#949ba3;
+  --dsw-alias-label-on-accent:#fff;
+  --dsw-alias-border-l2:rgba(19,45,83,.12);
+  --dsw-alias-border-l3:rgba(19,45,83,.2);
+  --dsw-alias-interactive-bg-hover:rgba(19,45,83,.06);
+  --dsw-alias-state-success-primary:#2b8a3e;
+  --dsw-alias-state-warn-primary:#9a6400;
+  --dsw-alias-state-error-primary:#c2255c;
+}
+
+/* ══ 面板真实样式（由 panel-styles.ts 的真实 installConsoleStyles() 导出）══ */
+
+/* ── local tokens ─────────────────────────────────────────────────────── */
+/* Both surfaces (the console's .bp-console, the briefing's .bq-brief) declare
+   the same names, so a component class dropped into either one resolves
+   identically. The values live here exactly once. */
+.bp-console,
+.bq-brief {
+  --bp-ink-1: var(--dsw-alias-label-primary);
+  --bp-ink-2: var(--dsw-alias-label-secondary);
+  --bp-ink-3: var(--dsw-alias-label-tertiary);
+  --bp-ink-4: var(--dsw-alias-label-caption);
+  --bp-hair: var(--dsw-alias-border-l2);
+  --bp-hair-strong: var(--dsw-alias-border-l3);
+  --bp-hover: var(--dsw-alias-interactive-bg-hover);
+  --bp-ok: var(--dsw-alias-state-success-primary);
+  --bp-warn: var(--dsw-alias-state-warn-primary);
+  --bp-bad: var(--dsw-alias-state-error-primary);
+  --bp-idle: var(--dsw-alias-label-caption);
+  /* Frosted, not opaque: the canvas still shows through, but the card is
+     lighter than it, which is what makes it read as a raised surface. */
+  --bp-tile-a: rgba(255, 255, 255, 0.9);
+  --bp-tile-b: rgba(255, 255, 255, 0.56);
+  --bp-tile-solid: rgba(255, 255, 255, 0.72);
+  --bp-band: rgba(255, 255, 255, 0.66);
+  --bp-lift: 0 1px 2px rgba(15, 17, 21, 0.06);
+  --bp-lift-hover: 0 6px 16px rgba(15, 17, 21, 0.1), 0 1px 3px rgba(15, 17, 21, 0.06);
+  --bp-lift-drag: 0 14px 30px rgba(15, 17, 21, 0.18), 0 2px 6px rgba(15, 17, 21, 0.1);
+}
+body[data-ds-dark-theme] .bp-console,
+body[data-ds-dark-theme] .bq-brief {
+  --bp-tile-a: rgba(255, 255, 255, 0.06);
+  --bp-tile-b: rgba(255, 255, 255, 0.02);
+  --bp-tile-solid: rgba(255, 255, 255, 0.05);
+  --bp-band: rgba(21, 21, 23, 0.62);
+  --bp-lift: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --bp-lift-hover: 0 8px 20px rgba(0, 0, 0, 0.5), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --bp-lift-drag: 0 18px 36px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+/* ── page shell ───────────────────────────────────────────────────────── */
+.bp-console {
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+  padding: 0 clamp(16px, 2.4vw, 32px) 36px;
+  font-family: var(--dsw-font-family);
+  font-size: 13px;
+  color: var(--bp-ink-1);
+  -webkit-font-smoothing: antialiased;
+}
+.bp-console[data-wide="false"] { padding: 0 16px 22px; }
+
+.bp-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  min-height: 62px;
+  padding: 14px 22px;
+  /* The bar keeps the same 16px inset as every content group below it. It used
+     to span the whole slot while the groups were inset, which left the bar
+     32px wider than the content it heads. */
+  margin: 12px 16px 0;
+  /* The host glass skin may style the surrounding title surface. This rule
+     owns only the title content box, including its safe inner padding. */
+  position: static;
+  background: var(--dsh-aqua-glass-card-light, rgba(255,255,255,.42));
+  border: 1px solid rgba(19,45,83,.26);
+  border-bottom-color: transparent;
+  box-shadow: rgba(255,255,255,.5) 0 1px 0 inset, rgba(19,45,83,.16) 0 10px 34px;
+  backdrop-filter: blur(var(--dsh-aqua-blur,14px));
+  -webkit-backdrop-filter: blur(var(--dsh-aqua-blur,14px));
+}
+body[data-ds-dark-theme] .bp-head {
+  background: var(--dsh-aqua-glass-card-dark, rgba(0,0,0,.4));
+  border-color: rgba(148,180,220,.32);
+  box-shadow: rgba(255,255,255,.07) 0 1px 0 inset, rgba(2,6,14,.32) 0 8px 30px;
+}
+
+/* The title bar and every content group keep the same 16px inset from the page
+   slot, so the bar's edges line up with the content beneath it. */
+.bp-console > .bp-carry,
+.bp-console > .bp-sec {
+  margin-left: 16px;
+  margin-right: 16px;
+}
+.bp-console > .bp-carry { margin-top: 24px; }
+.bp-console > .bp-sec { margin-bottom: 26px; }
+
+/* The float skin uses substring selectors such as [class*="card"]. Match
+   its specificity without flattening the glass shell. Only the card internals
+   and their separator surfaces are made stable and legible. */
+[data-dsh-float] .bp-tile {
+  border-radius: 12px;
+  border-color: var(--bp-hair-strong);
+}
+[data-dsh-float] .bp-tile__head,
+[data-dsh-float] .bp-tile__mark,
+[data-dsh-float] .bp-tile__foot,
+[data-dsh-float] .bp-tile__acts {
+  border-radius: inherit;
+}
+[data-dsh-float] .bp-tile__foot {
+  background: var(--bp-tile-solid);
+  border-top-color: var(--bp-hair-strong);
+}
+[data-dsh-float] .bp-btn,
+[data-dsh-float] .bp-chip,
+[data-dsh-float] .bp-search {
+  border-color: var(--bp-hair-strong);
+  background: var(--bp-tile-solid);
+}
+/* The title must not inherit the host's <header> rule; current markup is a
+   div, but this defensive selector keeps a future semantic change safe. */
+[data-dsh-float] .bp-head {
+  margin: 12px 16px 0;
+  padding: 14px 22px;
+  border-radius: 20px;
+  box-sizing: border-box;
+}
+
+.bp-head__title { margin: 0; font: 600 15px/22px var(--dsw-font-family); letter-spacing: -0.01em; }
+.bp-head__sub { font: var(--dsw-font-xxs-12); color: var(--bp-ink-3); }
+.bp-head__spacer { flex: 1 1 auto; }
+.bp-head__meta { font: var(--dsw-font-xxxs-11); color: var(--bp-ink-4); }
+
+/* ── controls ─────────────────────────────────────────────────────────── */
+.bp-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  min-width: 168px;
+  border: 1px solid var(--bp-hair);
+  border-radius: 8px;
+  background: var(--bp-tile-solid);
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.bp-search:focus-within {
+  border-color: var(--bp-hair-strong);
+  box-shadow: 0 0 0 3px var(--bp-hover);
+}
+.bp-search__icon { flex: none; width: 13px; height: 13px; color: var(--bp-ink-4); }
+.bp-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--bp-ink-1);
+  font: var(--dsw-font-xxs-12);
+}
+.bp-search input::placeholder { color: var(--bp-ink-4); }
+.bp-search__clear {
+  flex: none; width: 16px; height: 16px; padding: 0; line-height: 1;
+  border: 0; border-radius: 999px; background: transparent;
+  color: var(--bp-ink-4); cursor: pointer; font-size: 13px;
+}
+.bp-search__clear:hover { background: var(--bp-hover); color: var(--bp-ink-2); }
+
+.bp-btn {
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--bp-hair);
+  border-radius: 8px;
+  background: var(--bp-tile-solid);
+  color: var(--bp-ink-2);
+  font: var(--dsw-font-xxs-strong-12);
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.bp-btn:hover:not(:disabled) { background: var(--bp-hover); border-color: var(--bp-hair-strong); color: var(--bp-ink-1); }
+.bp-btn:active:not(:disabled) { transform: translateY(0.5px); }
+.bp-btn:disabled { opacity: 0.45; cursor: default; }
+.bp-btn--ghost { background: transparent; border-color: transparent; color: var(--bp-ink-3); padding: 0 8px; }
+.bp-btn--ghost:hover:not(:disabled) { background: var(--bp-hover); border-color: transparent; color: var(--bp-ink-1); }
+.bp-btn--danger:hover:not(:disabled) { color: var(--bp-bad); border-color: var(--bp-bad); }
+
+:where(.bp-btn, .bp-grip, .bp-search__clear, .bp-tile__open):focus-visible {
+  outline: 2px solid var(--bp-ink-1);
+  outline-offset: 2px;
+}
+
+/* ── the carriers' status band ────────────────────────────────────────── */
+.bp-carry {
+  border: 1px solid var(--bp-hair);
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--bp-tile-a), var(--bp-tile-b));
+  box-shadow: var(--bp-lift);
+  padding: 14px 16px 16px;
+  margin-bottom: 26px;
+}
+.bp-carry__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.bp-carry__title { margin: 0; font: 600 13px/20px var(--dsw-font-family); letter-spacing: -0.005em; }
+.bp-carry__note { font: var(--dsw-font-xxs-12); color: var(--bp-ink-3); }
+.bp-carry__grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
+.bp-console[data-wide="false"] .bp-carry__grid { grid-template-columns: 1fr; }
+
+.bp-run {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+  padding: 11px 13px;
+  border: 1px solid var(--bp-hair);
+  border-radius: 10px;
+  background: var(--bp-tile-solid);
+}
+.bp-run__text { min-width: 0; flex: 1 1 auto; }
+.bp-run__name { font: var(--dsw-font-xs-strong-13); overflow-wrap: anywhere; }
+.bp-run__meta {
+  font: var(--dsw-font-xxs-12);
+  color: var(--bp-ink-3);
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
+.bp-run__meta[data-bad="true"] { color: var(--bp-bad); }
+
+/* ── sections ─────────────────────────────────────────────────────────── */
+.bp-sec { margin-bottom: 26px; }
+.bp-sec__head {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 0 9px;
+  background: var(--bp-band);
+  backdrop-filter: blur(12px) saturate(1.6);
+  -webkit-backdrop-filter: blur(12px) saturate(1.6);
+}
+.bp-sec__title { margin: 0; font: 600 13px/20px var(--dsw-font-family); letter-spacing: -0.005em; }
+.bp-sec__count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--bp-hover);
+  color: var(--bp-ink-3);
+  font: var(--dsw-font-xxxs-strong-11);
+  line-height: 17px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.bp-sec__rule { flex: 1 1 auto; height: 1px; background: var(--bp-hair); }
+.bp-sec__hint { font: var(--dsw-font-xxxs-11); color: var(--bp-ink-4); }
+
+/* ── the grid ─────────────────────────────────────────────────────────── */
+.bp-grid {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(312px, 1fr));
+  align-items: stretch;
+}
+.bp-console[data-wide="false"] .bp-grid { grid-template-columns: 1fr; gap: 10px; }
+
+/* ── a card ───────────────────────────────────────────────────────────── */
+.bp-tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--bp-hair);
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--bp-tile-a), var(--bp-tile-b));
+  box-shadow: var(--bp-lift);
+  overflow: hidden;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease;
+}
+.bp-tile::before {
+  /* The lit top edge. Without it a translucent card on a light canvas has no
+     top boundary and the grid reads as loose text. */
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.75);
+  pointer-events: none;
+}
+body[data-ds-dark-theme] .bp-tile::before { background: rgba(255, 255, 255, 0.07); }
+.bp-tile:hover { border-color: var(--bp-hair-strong); box-shadow: var(--bp-lift-hover); }
+
+/* The state rail: 3px of colour down the leading edge. This is the cue that
+   makes "which of these are up" answerable without reading a single word. */
+.bp-tile__rail {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--bp-idle);
+  opacity: 0.9;
+}
+.bp-tile[data-tone="ok"] .bp-tile__rail { background: var(--bp-ok); }
+.bp-tile[data-tone="warn"] .bp-tile__rail { background: var(--bp-warn); }
+.bp-tile[data-tone="bad"] .bp-tile__rail { background: var(--bp-bad); }
+
+.bp-tile__head { display: flex; align-items: flex-start; gap: 11px; padding: 13px 13px 11px; }
+
+.bp-tile__mark {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font: 600 12px/1 var(--dsw-font-family);
+  letter-spacing: 0.01em;
+  user-select: none;
+}
+
+.bp-tile__mark[data-hue="0"] { background: #3B5BDB1f; color: #3B5BDB; }
+body[data-ds-dark-theme] .bp-tile__mark[data-hue="0"] { background: #91A7FF2e; color: #91A7FF; }
+.bp-tile__mark[data-hue="1"] { background: #0B72851f; color: #0B7285; }
+body[data-ds-dark-theme] .bp-tile__mark[data-hue="1"] { background: #66D9E82e; color: #66D9E8; }
+.bp-tile__mark[data-hue="2"] { background: #9A64001f; color: #9A6400; }
+body[data-ds-dark-theme] .bp-tile__mark[data-hue="2"] { background: #FFD43B2e; color: #FFD43B; }
+.bp-tile__mark[data-hue="3"] { background: #7048E81f; color: #7048E8; }
+body[data-ds-dark-theme] .bp-tile__mark[data-hue="3"] { background: #B197FC2e; color: #B197FC; }
+.bp-tile__mark[data-hue="4"] { background: #C2255C1f; color: #C2255C; }
+body[data-ds-dark-theme] .bp-tile__mark[data-hue="4"] { background: #F783AC2e; color: #F783AC; }
+.bp-tile__mark[data-hue="5"] { background: #2B8A3E1f; color: #2B8A3E; }
+body[data-ds-dark-theme] .bp-tile__mark[data-hue="5"] { background: #8CE99A2e; color: #8CE99A; }
+.bp-tile__mark[data-hue="6"] { background: #1864AB1f; color: #1864AB; }
+body[data-ds-dark-theme] .bp-tile__mark[data-hue="6"] { background: #74C0FC2e; color: #74C0FC; }
+.bp-tile__mark[data-hue="7"] { background: #D9480F1f; color: #D9480F; }
+body[data-ds-dark-theme] .bp-tile__mark[data-hue="7"] { background: #FFA94D2e; color: #FFA94D; }
+
+.bp-tile__open { display: block; min-width: 0; flex: 1 1 auto; border-radius: 6px; }
+.bp-tile__open[data-clickable="true"] { cursor: pointer; }
+.bp-tile__open[data-clickable="true"]:hover .bp-tile__name { text-decoration: underline; text-underline-offset: 2px; }
+.bp-tile__name {
+  margin: 0;
+  font: 600 13.5px/19px var(--dsw-font-family);
+  letter-spacing: -0.005em;
+  overflow-wrap: anywhere;
+}
+.bp-tile__desc {
+  margin: 3px 0 0;
+  font: 12px/16.5px var(--dsw-font-family);
+  color: var(--bp-ink-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  min-height: 33px;
+}
+.bp-tile__desc[data-bad="true"] { color: var(--bp-bad); }
+.bp-tile__desc[data-idle="true"] { color: var(--bp-ink-4); }
+
+/* ── the grip ─────────────────────────────────────────────────────────── */
+.bp-grip {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: -1px -2px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--bp-ink-4);
+  opacity: 0.5;
+  cursor: grab;
+  display: grid;
+  place-items: center;
+  touch-action: none;
+  transition: opacity 0.12s ease, background-color 0.12s ease;
+}
+.bp-tile:hover .bp-grip, .bp-grip:focus-visible { opacity: 1; }
+.bp-grip:hover { background: var(--bp-hover); color: var(--bp-ink-2); }
+.bp-grip:active, body[data-bp-drag] .bp-grip { cursor: grabbing; }
+body[data-bp-drag] { cursor: grabbing; }
+body[data-bp-drag] * { cursor: grabbing !important; user-select: none !important; }
+
+/* ── the card's own controls ──────────────────────────────────────────── */
+.bp-tile__foot {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 13px 12px;
+  border-top: 1px solid var(--bp-hair);
+  background: var(--bp-tile-solid);
+}
+.bp-tile__acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.bp-btn--act {
+  height: 25px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font: var(--dsw-font-xxxs-strong-11);
+}
+.bp-btn--primary {
+  border-color: transparent;
+  background: var(--bp-hover);
+  color: var(--bp-ink-1);
+}
+.bp-btn--primary:hover:not(:disabled) { border-color: var(--bp-hair-strong); }
+
+.bp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  padding: 0 7px;
+  height: 19px;
+  border: 1px solid var(--bp-hair);
+  border-radius: 6px;
+  background: var(--bp-hover);
+  color: var(--bp-ink-2);
+  font: var(--dsw-font-xxxs-strong-11);
+  white-space: nowrap;
+}
+.bp-chip[data-tone="ok"] { color: var(--bp-ink-1); }
+.bp-chip--soft { background: transparent; border-style: dashed; color: var(--bp-ink-3); }
+.bp-tile__slot {
+  font: var(--dsw-font-xxxs-11);
+  color: var(--bp-ink-4);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* One state dot, shared by a chip and a carrier row. The halo is the theme's
+   hover wash rather than the dot's own colour at 13%: the colour needs no
+   second alpha ramp, and an opaque halo reads on both themes. */
+.bp-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--bp-idle);
+  box-shadow: 0 0 0 3px var(--bp-hover);
+}
+.bp-dot[data-tone="ok"] { background: var(--bp-ok); }
+.bp-dot[data-tone="warn"] { background: var(--bp-warn); }
+.bp-dot[data-tone="bad"] { background: var(--bp-bad); }
+.bp-run .bp-dot { width: 8px; height: 8px; }
+
+/* ── drag state ───────────────────────────────────────────────────────── */
+.bp-tile[data-dragging="true"] {
+  opacity: 0.5;
+  border-style: dashed;
+  box-shadow: var(--bp-lift-drag);
+}
+.bp-drop {
+  position: absolute;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--bp-ink-1);
+  box-shadow: 0 0 0 3px var(--bp-hover);
+  pointer-events: none;
+  z-index: 4;
+}
+.bp-drop::before {
+  content: "";
+  position: absolute;
+  top: -3px;
+  left: -2.5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--bp-ink-1);
+}
+
+/* ── notes ────────────────────────────────────────────────────────────── */
+.bp-note {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 14px;
+  padding: 8px 11px;
+  border: 1px solid var(--bp-hair);
+  border-radius: 9px;
+  background: var(--bp-hover);
+  font: var(--dsw-font-xxs-12);
+  color: var(--bp-ink-2);
+}
+.bp-note[data-tone="bad"] { color: var(--bp-bad); }
+.bp-empty { margin: 0; padding: 10px 0; font: var(--dsw-font-xs-13); color: var(--bp-ink-3); }
+
+/* ══ briefing (Butler 简报页) ═══════════════════════════════════════════
+   Shares the token block and every component class above (bp-head / bp-tile /
+   bp-btn / bp-chip / bp-dot / bp-note). Only the layout this page owns lives
+   here: the metric strip, the two reading columns, the digest list, the
+   capability band, and the folded machine detail. Sharing the classes is the
+   whole point — the two surfaces must not drift into two skins. */
+
+.bq-brief {
+  height: 100%;
+  box-sizing: border-box;
+  overflow-y: auto;
+  /* Same geometry as the console: the glass head and every content group share
+     one inset, so the bar lines up with the content beneath it. A max-width of
+     our own is what made the briefing read as a different app next to the
+     console. */
+  padding: 0 clamp(16px, 2.4vw, 32px) 36px;
+  font-family: var(--dsw-font-family);
+  font-size: 13px;
+  color: var(--bp-ink-1);
+  -webkit-font-smoothing: antialiased;
+}
+.bq-brief > .bq-metrics,
+.bq-brief > .bq-cols,
+.bq-brief > .bq-band,
+.bq-brief > .bq-folds,
+.bq-brief > .bp-note {
+  margin-left: 16px;
+  margin-right: 16px;
+}
+
+/* The status band is the console's glass head verbatim (bp-head); only the
+   verdict column and the stamp are this page's own. */
+.bq-top__verdict { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.bq-states { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.bq-top__stamp { font: var(--dsw-font-xxxs-11); color: var(--bp-ink-4); font-variant-numeric: tabular-nums; }
+.bq-top__stamp b { font-weight: 500; color: var(--bp-ink-2); }
+.bq-mark { flex: none; width: 38px; height: 38px; border-radius: 11px; object-fit: cover; }
+
+/* ── metric strip ─────────────────────────────────────────────────────── */
+.bq-metrics {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 14px 0 13px;
+  border-bottom: 1px solid var(--bp-hair);
+  margin-bottom: 20px;
+}
+.bq-metric {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0 16px;
+  border-right: 1px solid var(--bp-hair);
+  font: var(--dsw-font-xxs-12);
+  color: var(--bp-ink-3);
+}
+.bq-metric:first-child { padding-left: 0; }
+.bq-metric:last-child { border-right: 0; }
+.bq-metric b { font: 600 14px/18px var(--dsw-font-family); color: var(--bp-ink-1); font-variant-numeric: tabular-nums; }
+.bq-metric b[data-dim="true"] { color: var(--bp-ink-3); font-weight: 500; }
+.bq-metric__gl { display: inline-flex; align-items: center; gap: 5px; }
+
+/* ── two reading columns: decisions beside the digests ────────────────── */
+/* Spacing comes from the grid gap alone. A sibling margin here is what once
+   put the right card 20px lower than the left one — the alignment bug. */
+.bq-cols {
+  display: grid;
+  grid-template-columns: 352px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 1040px) {
+  .bq-cols,
+  .bq-caps { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* The page's tiles are the console's tiles (bp-tile); only the internals this
+   page needs are added here. */
+.bq-tile__count {
+  min-width: 19px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--bp-hover);
+  color: var(--bp-ink-3);
+  font: var(--dsw-font-xxxs-strong-11);
+  line-height: 17px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.bq-tile__count[data-tone="warn"] { background: var(--bp-warn); color: var(--dsw-alias-label-on-accent, #1a1200); }
+.bq-tile__count[data-tone="bad"] { background: var(--bp-bad); color: var(--dsw-alias-label-on-accent, #fff); }
+
+.bq-group { padding: 11px 13px 13px; }
+.bq-group + .bq-group { border-top: 1px dashed var(--bp-hair); }
+/* The clear-state note carries a numeric evidence tail; on a narrow tile the
+   two do not fit on one line, so the tail wraps and right-aligns instead of
+   squeezing the message. */
+.bq-brief .bp-note { flex-wrap: wrap; row-gap: 2px; }
+.bq-brief .bp-note > .bp-tile__slot { margin-left: auto; }
+.bq-group__label { display: flex; align-items: center; gap: 7px; font: var(--dsw-font-xxxs-11); color: var(--bp-ink-4); margin-bottom: 9px; }
+.bq-group__label em { font-style: normal; font-variant-numeric: tabular-nums; }
+.bq-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.bq-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 11px;
+  border-radius: 9px;
+  border-left: 3px solid var(--bp-idle);
+  background: var(--bp-tile-solid);
+  font: 12.5px/1.5 var(--dsw-font-family);
+}
+.bq-row[data-tone="warn"] { border-left-color: var(--bp-warn); }
+.bq-row[data-tone="bad"] { border-left-color: var(--bp-bad); }
+.bq-row[data-tone="info"] { border-left-color: var(--bp-hair-strong); }
+.bq-row__text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.bq-row__tag {
+  flex: none;
+  font: var(--dsw-font-xxxs-11);
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--bp-hair);
+  color: var(--bp-ink-4);
+}
+.bq-none { font: var(--dsw-font-xxs-12); color: var(--bp-ink-4); padding: 2px 0 4px; }
+
+/* ── digest list ──────────────────────────────────────────────────────── */
+.bq-tabs { display: flex; gap: 2px; padding: 9px 12px; border-bottom: 1px solid var(--bp-hair); background: var(--bp-band); }
+.bq-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: var(--dsw-font-xxs-12);
+  padding: 4px 11px;
+  border-radius: 7px;
+  border: 0;
+  background: transparent;
+  color: var(--bp-ink-2);
+  cursor: pointer;
+}
+.bq-tab[aria-selected="true"] { background: var(--bp-tile-solid); color: var(--bp-ink-1); font-weight: 500; box-shadow: var(--bp-lift); }
+.bq-tab__n { font: var(--dsw-font-xxxs-11); color: var(--bp-ink-4); font-variant-numeric: tabular-nums; }
+.bq-issues { list-style: none; margin: 0; padding: 6px; display: grid; gap: 2px; }
+.bq-issue {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+}
+.bq-issue:hover { background: var(--bp-hover); }
+.bq-issue[aria-current="true"] { background: var(--bp-hover); border-left-color: var(--bp-ink-1); }
+.bq-issue__day { display: flex; flex-direction: column; width: 56px; flex: none; }
+.bq-issue__day b { font: 600 12px/15px var(--dsw-font-family); font-variant-numeric: tabular-nums; }
+.bq-issue__day em { font-style: normal; font: var(--dsw-font-xxxs-11); color: var(--bp-ink-4); }
+.bq-issue__sum { flex: 1 1 auto; min-width: 0; font: var(--dsw-font-xxs-12); color: var(--bp-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bq-doc { padding: 14px 13px 16px; border-top: 1px solid var(--bp-hair); }
+.bq-doc__title { margin: 0 0 8px; font: 600 13.5px/19px var(--dsw-font-family); display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bq-doc__text { margin: 0; font: 12.5px/1.75 var(--dsw-font-family); color: var(--bp-ink-2); max-width: 74ch; }
+.bq-doc__foot { display: flex; align-items: center; gap: 10px; margin-top: 12px; padding-top: 11px; border-top: 1px solid var(--bp-hair); font: var(--dsw-font-xxs-12); color: var(--bp-ink-4); }
+.bq-pending { display: flex; gap: 11px; padding: 16px 13px; color: var(--bp-ink-2); }
+.bq-pending b { display: block; font: 600 13px/18px var(--dsw-font-family); color: var(--bp-ink-1); }
+.bq-pending span:last-child { font: var(--dsw-font-xxs-12); color: var(--bp-ink-3); }
+
+/* 一行摘要 + 一个主日期已经说明了期号；星期是主人真正会找的那个字段。 */
+.bq-issue__wd { color: var(--bp-ink-2); }
+
+/* ── capability band ──────────────────────────────────────────────────── */
+.bq-band { margin-top: 26px; }
+.bq-band__head { display: flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+.bq-band__title { margin: 0; font: 600 13px/20px var(--dsw-font-family); letter-spacing: -0.005em; }
+.bq-band__to { margin-left: auto; font: var(--dsw-font-xxxs-11); color: var(--bp-ink-4); padding: 2px 9px; border: 1px solid var(--bp-hair); border-radius: 999px; }
+.bq-caps { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(312px, 1fr)); align-items: stretch; }
+.bq-ctlrow { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
+.bq-ctl { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.bq-ctl__k { font: var(--dsw-font-xxxs-11); color: var(--bp-ink-4); width: 26px; flex: none; }
+.bq-out { margin-top: 10px; padding: 10px 11px; border-radius: 8px; border: 1px solid var(--bp-hair); background: var(--bp-tile-solid); max-height: 260px; overflow: auto; }
+.bq-out pre { margin: 0; font: 11px/1.7 var(--dsw-font-mono, ui-monospace, monospace); white-space: pre-wrap; color: var(--bp-ink-2); overflow-wrap: anywhere; }
+.bq-out__state { font: var(--dsw-font-xxs-12); color: var(--bp-warn); }
+.bq-fac__head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.bq-fac__idcol { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 auto; }
+.bq-fac__id { font: var(--dsw-font-xxxs-11); font-family: var(--dsw-font-mono, ui-monospace, monospace); color: var(--bp-ink-4); }
+.bq-fac__ver { margin-left: auto; font: var(--dsw-font-xxxs-11); color: var(--bp-ink-4); border: 1px solid var(--bp-hair); border-radius: 5px; padding: 1px 6px; }
+.bq-fac[data-bad="true"] { border-color: var(--bp-warn); }
+.bq-fac__reason { font: var(--dsw-font-xxs-12); color: var(--bp-warn); line-height: 1.6; overflow-wrap: anywhere; }
+
+/* ── folded machine detail ────────────────────────────────────────────── */
+.bq-folds { margin-top: 26px; border: 1px solid var(--bp-hair); border-radius: 12px; background: linear-gradient(180deg, var(--bp-tile-a), var(--bp-tile-b)); overflow: hidden; }
+.bq-fold + .bq-fold { border-top: 1px solid var(--bp-hair); }
+.bq-fold__sum { display: flex; align-items: center; gap: 9px; padding: 11px 15px; cursor: pointer; list-style: none; font: 12.5px/18px var(--dsw-font-family); }
+.bq-fold__sum::-webkit-details-marker { display: none; }
+.bq-fold__sum:hover { background: var(--bp-hover); }
+.bq-fold__caret { color: var(--bp-ink-4); font-size: 10px; transition: transform 0.15s ease; }
+details[open] > .bq-fold__sum .bq-fold__caret { transform: rotate(90deg); }
+.bq-fold__meta { margin-left: auto; font: var(--dsw-font-xxs-12); color: var(--bp-ink-4); font-variant-numeric: tabular-nums; }
+.bq-fold__body { padding: 2px 13px 13px; }
+.bq-folds ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.bq-folds li { display: flex; align-items: center; gap: 9px; font: var(--dsw-font-xxs-12); padding: 6px 0; color: var(--bp-ink-2); }
+.bq-folds li em { margin-left: auto; font-style: normal; font: var(--dsw-font-xxxs-11); color: var(--bp-ink-4); font-family: var(--dsw-font-mono, ui-monospace, monospace); }
+.bq-fold__body pre { margin: 0; font: 11.5px/1.75 var(--dsw-font-mono, ui-monospace, monospace); white-space: pre-wrap; color: var(--bp-ink-2); overflow-wrap: anywhere; }
+
+
+/* ── 以下全部是「预览外壳」，不属于面板，上线代码里不存在 ────────────── */
+html,body{margin:0;padding:0;background:#eef0f4;font:400 13px/1.5 -apple-system,"PingFang SC",system-ui,sans-serif;color:#1c1f23;}
+.shell{max-width:1240px;margin:0 auto;padding:20px 20px 60px;}
+h1.pv{font:600 17px/24px var(--dsw-font-family);margin:0 0 4px;}
+p.pv-sub{font:400 12px/18px var(--dsw-font-family);color:#6b7280;margin:0 0 16px;}
+.bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;position:sticky;top:0;z-index:9;background:#eef0f4;padding:10px 0;}
+.bar button{font:500 12px/18px var(--dsw-font-family);padding:7px 13px;border-radius:8px;border:1px solid #cfd4dc;background:#fff;color:#333;cursor:pointer;}
+.bar button[aria-pressed="true"]{background:#1c1f23;color:#fff;border-color:#1c1f23;}
+.bar .tag{font:400 11px/16px var(--dsw-font-family);color:#6b7280;margin-left:4px;}
+.stage{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start;}
+@media (max-width:1100px){.stage{grid-template-columns:1fr;}}
+.pv-cap{font:600 12px/18px var(--dsw-font-family);color:#374151;margin:0 0 6px;display:flex;align-items:center;gap:8px;}
+.pv-cap span{font-weight:400;color:#6b7280;}
+.slot{position:relative;height:470px;background:#f7f8fa;border:1px solid #d8dde5;border-radius:12px;overflow:hidden;}
+/* 三条参考竖线：面板内容区左右边缘（= 标题条边缘），用来肉眼比对内容组是否对齐 */
+.slot::before,.slot::after{content:"";position:absolute;top:0;bottom:0;width:1px;background:rgba(220,38,38,.55);z-index:5;pointer-events:none;}
+.slot::before{left:var(--shell-pad);}
+.slot::after{right:var(--shell-pad);}
+.readout{margin-top:16px;background:#fff;border:1px solid #d8dde5;border-radius:12px;padding:14px 16px;overflow:auto;}
+table.rd{border-collapse:collapse;width:100%;font:400 12px/18px var(--dsw-font-family);}
+table.rd th,table.rd td{padding:5px 10px;text-align:right;border-bottom:1px solid #eef0f4;white-space:nowrap;}
+table.rd th:first-child,table.rd td:first-child{text-align:left;}
+table.rd th{font-weight:600;color:#6b7280;}
+table.rd tr.sum td{font-weight:600;background:#fafbfc;}
+.d-ok{color:#2b8a3e;font-weight:600;}
+.d-bad{color:#c2255c;font-weight:600;}
+
+/* ── 两态对照：改后就是上面这份真实 CSS；改前把 Title 条的 16px 内缩退回去 ── */
+[data-mode="before"] .bp-head{margin-left:0;margin-right:0;}
+</style>
+</head>
+<body>
+<div class="shell">
+  <h1 class="pv">Title 条 vs 下方内容区 · 几何对照</h1>
+  <p class="pv-sub">红色竖线 = 标题条当前的两条边缘。切换方案后看内容组的边缘是否压在这两条线上；下方读数为 <b>getBoundingClientRect</b> 实测值。</p>
+
+  <div class="bar">
+    <button data-m="after" aria-pressed="true">改后 0.7.3：Title 与内容同宽</button>
+    <button data-m="before" aria-pressed="false">改前 0.7.2：Title 宽出 32px</button>
+    <span class="tag">红竖线 = 标题条与内容组共同的内缩线，内容边缘应压在线上</span>
+  </div>
+
+  <div class="stage">
+    <div>
+      <p class="pv-cap">操作台 <span>.bp-console · bp-head 满宽 / bp-carry·bp-sec 内缩16</span></p>
+      <div class="slot" id="slot-console">
+        <div class="bp-console" data-wide="true">
+          <div class="bp-head">
+            <h1 class="bp-head__title">操作台</h1>
+            <span class="bp-head__sub">已登记的工具、服务与工作流</span>
+            <span class="bp-head__spacer"></span>
+            <label class="bp-search"><input type="search" placeholder="搜索工具、服务、工作流" aria-label="筛选"></label>
+            <button class="bp-btn bp-btn--ghost">查看变更</button>
+          </div>
+          <div class="bp-carry">
+            <h2 class="bp-carry__title">守护进程 <span class="bp-head__sub">由 launchd 托管</span></h2>
+            <div class="bp-carry__grid">
+              <article class="bp-tile">
+                <div class="bp-tile__head">
+                  <span class="bp-tile__mark" data-hue="0">BG</span>
+                  <div><h3 class="bp-tile__name">Butler Guardian</h3><p class="bp-tile__desc">launchd · :37900</p></div>
+                </div>
+                <div class="bp-tile__foot"><span class="bp-chip">运行中</span><span class="bp-tile__acts"><button class="bp-btn">重启</button></span></div>
+              </article>
+            </div>
+          </div>
+          <section class="bp-sec">
+            <div class="bp-sec__head"><h2 class="bp-sec__title">服务</h2><span class="bp-chip">4</span></div>
+            <div class="bp-grid">
+              <article class="bp-tile">
+                <div class="bp-tile__head">
+                  <span class="bp-tile__mark" data-hue="4">TA</span>
+                  <div><h3 class="bp-tile__name">TencentDB-Agent-Memory</h3><p class="bp-tile__desc">tencentdb-agent-memory</p></div>
+                </div>
+                <div class="bp-tile__foot"><span class="bp-chip">运行中</span><span class="bp-tile__acts"><button class="bp-btn">启动</button><button class="bp-btn">停止</button><button class="bp-btn">重启</button></span></div>
+              </article>
+              <article class="bp-tile">
+                <div class="bp-tile__head">
+                  <span class="bp-tile__mark" data-hue="1">NX</span>
+                  <div><h3 class="bp-tile__name">next-ai-draw-io</h3><p class="bp-tile__desc">图表生成服务</p></div>
+                </div>
+                <div class="bp-tile__foot"><span class="bp-chip">运行中</span><span class="bp-tile__acts"><button class="bp-btn">重启</button></span></div>
+              </article>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p class="pv-cap">Butler 简报 <span>.bq-brief · bp-head 满宽 / bq-* 内缩16</span></p>
+      <div class="slot" id="slot-brief">
+        <div class="bq-brief">
+          <div class="bp-head">
+            <img class="bq-mark" alt="" width="38" height="38" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='38' height='38'><rect width='38' height='38' rx='11' fill='%23e6ecf5'/><text x='19' y='25' text-anchor='middle' font-size='16' fill='%233b5bdb'>B</text></svg>">
+            <div><h1 class="bp-head__title">Butler 简报</h1><p class="bp-head__sub">MySpace · 专属 Agent</p></div>
+            <div class="bq-top__verdict">
+              <div class="bq-states"><span class="bp-chip"><span class="bp-dot" data-tone="ok"></span>巡检通过</span></div>
+              <span class="bq-top__stamp">2026-09-23 15:00:02</span>
+            </div>
+          </div>
+          <div class="bq-metrics">
+            <div class="bq-metric"><span class="bq-metric__gl"><span class="bp-dot" data-tone="ok"></span>巡检</span><b>9 / 0 / 0</b></div>
+            <div class="bq-metric">端点<b>3 / 3</b></div>
+            <div class="bq-metric">journal<b>28</b></div>
+            <div class="bq-metric">spool<b data-dim="true">0</b></div>
+          </div>
+          <div class="bq-cols">
+            <section class="bp-sec">
+              <div class="bp-sec__head"><h2 class="bp-sec__title">待你决定</h2><span class="bp-chip">0</span></div>
+              <p class="bp-note">目前没有待你处理的事（巡检 9/0/0 · 端点 3/3 · spool 0）</p>
+            </section>
+            <section class="bp-sec">
+              <div class="bp-sec__head"><h2 class="bp-sec__title">日报</h2></div>
+              <ul class="bq-rows">
+                <li><span>09-23 周三</span><b>daily-2026-09-23</b></li>
+                <li><span>09-22 周二</span><b>daily-2026-09-22</b></li>
+                <li><span>09-21 周一</span><b>daily-2026-09-21</b></li>
+              </ul>
+            </section>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="readout">
+    <table class="rd" id="rd">
+      <thead><tr><th>区域</th><th>元素</th><th>left</th><th>right</th><th>宽度</th><th>相对容器左内缩</th><th>相对容器右内缩</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const MODES = {after:'改后 0.7.3：Title 与内容同宽', before:'改前 0.7.2：Title 宽出 32px'};
+/* 支持 ?mode=a 直接进入某个方案（供脚本自证/截图用） */
+const q = new URLSearchParams(location.search).get('mode');
+if (q && Object.prototype.hasOwnProperty.call(MODES, q)) {
+  document.documentElement.dataset.mode = q;
+  document.querySelectorAll('.bar button').forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.m === q)));
+}
+
+function shellPad(slot){
+  const shell = slot.querySelector('.bp-console, .bq-brief');
+  const cs = getComputedStyle(shell);
+  return {l: parseFloat(cs.paddingLeft), r: parseFloat(cs.paddingRight), shell};
+}
+
+function measure(){
+  const rows = [];
+  document.querySelectorAll('.slot').forEach(slot=>{
+    const name = slot.id === 'slot-console' ? '操作台' : 'Butler 简报';
+    const {l, r, shell} = shellPad(slot);
+    const base = shell.getBoundingClientRect();
+    // 参考线位置（红竖线的像素值）
+    slot.style.setProperty('--shell-pad', l + 'px');
+    const head = slot.querySelector('.bp-head');
+    const group = slot.querySelector('.bp-carry, .bq-metrics');
+    const sec   = slot.querySelector('.bp-sec');
+    const items = [['Title 条', head], ['内容组①', group], ['内容组②', sec]];
+    const rcs = items.map(([lab, el]) => {
+      if (!el) return null;
+      const rc = el.getBoundingClientRect();
+      return {
+        lab,
+        box: rc,
+        left: rc.left - base.left, right: base.right - rc.right, width: rc.width,
+      };
+    }).filter(Boolean);
+    rows.push({name, l, r, rcs});
+  });
+
+  const tb = document.querySelector('#rd tbody');
+  tb.innerHTML = '';
+  rows.forEach((row, i) => {
+    if (i) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = '<td colspan="7" style="height:8px;border:0"></td>';
+      tb.append(tr);
+    }
+    row.rcs.forEach((rc, j) => {
+      const tr = document.createElement('tr');
+      if (j === 0) tr.className = 'sum';
+      tr.innerHTML =
+        (j === 0 ? `<td rowspan="${row.rcs.length}">${row.name}<br><span style="font-weight:400;color:#6b7280">容器左右 padding ${row.l} / ${row.r}</span></td>` : '') +
+        `<td>${rc.lab}</td><td>${rc.left.toFixed(1)}</td><td>${rc.right.toFixed(1)}</td><td>${rc.width.toFixed(1)}</td>` +
+        `<td>${rc.left.toFixed(1)}</td><td>${rc.right.toFixed(1)}</td>`;
+      tb.append(tr);
+    });
+    const h = row.rcs[0], g = row.rcs[1];
+    if (h && g) {
+      const d = h.width - g.width;
+      const tr = document.createElement('tr');
+      tr.className = 'sum';
+      tr.innerHTML = `<td>差值</td>
+        <td>Title − 内容组①</td><td colspan="2">${d === 0 ? '—' : (d > 0 ? 'Title 更宽' : '内容更宽')}</td>
+        <td class="${Math.abs(d) < 0.5 ? 'd-ok' : 'd-bad'}">${d > 0 ? '+' : ''}${d.toFixed(1)} px</td>
+        <td colspan="2" class="${Math.abs(d) < 0.5 ? 'd-ok' : 'd-bad'}">${Math.abs(d) < 0.5 ? '对齐' : '未对齐'}</td>`;
+      tb.append(tr);
+    }
+  });
+}
+
+document.querySelectorAll('.bar button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.documentElement.dataset.mode = btn.dataset.m;
+    document.querySelectorAll('.bar button').forEach(b=>b.setAttribute('aria-pressed', String(b === btn)));
+    measure();
+  });
+});
+document.addEventListener('DOMContentLoaded', measure);
+window.addEventListener('load', measure);
+window.addEventListener('resize', measure);
+measure();
+</script>
+</body>
+</html>

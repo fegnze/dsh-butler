@@ -1,0 +1,296 @@
+#!/usr/bin/env python
+"""memory — 主人在 Butler 页面管理记忆：手写、修改、删除卡片，替换画像。
+
+用法（正文一律经 stdin）：
+  memory card-create <rule|knowledge>/<slug> --title <t> [--summary <line>]
+  memory card-update <rule|knowledge>/<slug> --title <t> [--summary <line>]   整张替换，保留 proposal/approvedAt
+  memory card-delete <rule|knowledge>/<slug>                                  移入 self/trash/，可找回
+  memory profile-set                                                          画像全文
+
+与 proposals apply 并列，是 rules/、knowledge/、persona/ 的另一条合法写入口：
+这里的每一次写入都是主人本人在页面上的操作，所以直接生效，并记一条 decision。
+每次写入后重编译 context.md；画像写入若令上下文超限，则整体回滚。
+退出码：0 成功；1 失败（不存在 / 已存在 / 超限）；2 用法错误。
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import os
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _legacy_guard import LegacyWriteBlocked, assert_legacy_write_allowed
+from _lib import (close_candidate, record_keys, record_kind, CANDIDATES_FILE, CANDIDATES_LOCK, CANDIDATE_TARGETS, load_candidates, CARD_KINDS, CARD_ORDER_FILE, SLUG_RE, load_card_order, BUTLER_ROOT, JOURNAL_FILE, JOURNAL_LOCK, PROFILE_FILE,
+                  PROPOSALS_LOCK, append_jsonl, atomic_write, card_path,
+                  compile_context, ensure_dirs, file_lock, one_line,
+                  render_card, split_card, utc_now)
+
+TRASH_DIR = BUTLER_ROOT / "trash"
+KIND_NAMES = {"rule": "规则卡", "knowledge": "知识卡"}
+
+
+class Usage(Exception):
+    pass
+
+
+class Failure(Exception):
+    pass
+
+
+def read_body() -> str:
+    body = sys.stdin.read().strip("\n")
+    if not body.strip():
+        raise Usage("正文为空，拒绝写入（正文经 stdin 传入）")
+    return body
+
+
+def journal(op: str, text: str, ref: str, origin: str = "") -> None:
+    record = {"ts": utc_now(), "source": "butler", "type": "decision", "tags": ["memory", op],
+              "text": text[:2000], "ref": ref}
+    if origin:
+        record["origin"] = origin  # 这条决定是从哪条记录升级来的；身份资料卡没有卡片文件，来源只能记在这里
+    with file_lock(JOURNAL_LOCK):
+        append_jsonl(JOURNAL_FILE, [record])
+
+
+def rebuild() -> None:
+    # 决定已落盘；上下文编译失败只告警，下次 build-context 可补。
+    try:
+        compile_context()
+    except (OSError, ValueError) as error:
+        print(f"memory: 已写入，但 context.md 编译失败：{error}", file=sys.stderr)
+
+
+def locate(card_id: str) -> Path:
+    path = card_path(card_id)
+    if path is None:
+        raise Usage(f"非法卡片 id {card_id!r}（须为 rule/<slug> 或 knowledge/<slug>）")
+    return path
+
+
+def cmd_create(args) -> int:
+    assert_legacy_write_allowed(BUTLER_ROOT)
+    path = locate(args.id)
+    title = one_line(args.title, 200)
+    if not title:
+        raise Usage("标题为空")
+    body = read_body()
+    ensure_dirs()
+    with file_lock(PROPOSALS_LOCK):
+        if path.exists():
+            raise Failure(f"{args.id} 已存在；要修改请用 card-update")
+        atomic_write(path, render_card(title, body, args.summary or "", approved_at=utc_now(), origin=args.origin or ""))
+        journal("create", f"手动新建{KIND_NAMES[args.id.split('/')[0]]} {args.id}：{title}", f"card://{args.id}")
+    close_candidate(args.origin or "")
+    rebuild()
+    print(f"{args.id} created")
+    return 0
+
+
+def cmd_update(args) -> int:
+    assert_legacy_write_allowed(BUTLER_ROOT)
+    path = locate(args.id)
+    title = one_line(args.title, 200)
+    if not title:
+        raise Usage("标题为空")
+    body = read_body()
+    with file_lock(PROPOSALS_LOCK):
+        if not path.exists():
+            raise Failure(f"{args.id} 不存在")
+        meta, _ = split_card(path.read_text(encoding="utf-8"))
+        atomic_write(path, render_card(title, body, args.summary or "",
+                                       proposal=meta.get("proposal", ""), approved_at=meta.get("approvedAt", ""),
+                                       origin=meta.get("origin", "")))
+        journal("update", f"手动修改{KIND_NAMES[args.id.split('/')[0]]} {args.id}：{title}", f"card://{args.id}")
+    rebuild()
+    print(f"{args.id} updated")
+    return 0
+
+
+def cmd_delete(args) -> int:
+    assert_legacy_write_allowed(BUTLER_ROOT)
+    path = locate(args.id)
+    with file_lock(PROPOSALS_LOCK):
+        if not path.exists():
+            raise Failure(f"{args.id} 不存在")
+        TRASH_DIR.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+        target = TRASH_DIR / f"{args.id.replace('/', '-')}-{stamp}.md"
+        os.replace(path, target)
+        journal("delete", f"手动删除{KIND_NAMES[args.id.split('/')[0]]} {args.id}（已移入 trash/，可找回）", f"card://{args.id}")
+    rebuild()
+    print(f"{args.id} deleted -> {target.relative_to(BUTLER_ROOT)}")
+    return 0
+
+
+def cmd_order(args) -> int:
+    """记下一个分区里卡片的顺序。排序不是内容决定，不写 journal（拖一下就一条会淹没真正的决定）。"""
+    assert_legacy_write_allowed(BUTLER_ROOT)
+    if args.kind not in CARD_KINDS:
+        raise Usage(f"未知分区 {args.kind!r}（rule 或 knowledge）")
+    slugs = [line.strip() for line in sys.stdin.read().splitlines() if line.strip()]
+    if not slugs:
+        raise Usage("顺序为空（每行一个 slug，经 stdin 传入）")
+    bad = [s for s in slugs if not SLUG_RE.match(s)]
+    if bad:
+        raise Usage(f"非法 slug：{bad[0]!r}")
+    present = {p.stem for p in CARD_KINDS[args.kind].glob("*.md")}
+    slugs = list(dict.fromkeys(s for s in slugs if s in present))  # 去重，丢掉已不存在的
+    ensure_dirs()
+    with file_lock(PROPOSALS_LOCK):
+        order = load_card_order()
+        order[args.kind] = slugs
+        atomic_write(CARD_ORDER_FILE, json.dumps(order, ensure_ascii=False, indent=2) + "\n")
+    rebuild()
+    print(f"{args.kind} order saved ({len(slugs)})")
+    return 0
+
+
+def write_profile(body: str) -> None:
+    """在 PROPOSALS_LOCK 内调用：写入身份资料并编译上下文；编译失败整体回滚，不留半成品。"""
+    previous = PROFILE_FILE.read_text(encoding="utf-8") if PROFILE_FILE.exists() else None
+    atomic_write(PROFILE_FILE, body)
+    try:
+        compile_context()
+    except ValueError as error:
+        # 资料过长会让注入上下文超限。
+        if previous is None:
+            PROFILE_FILE.unlink(missing_ok=True)
+        else:
+            atomic_write(PROFILE_FILE, previous)
+        raise Failure(f"身份资料未保存：{error}")
+    except OSError as error:
+        print(f"memory: 身份资料已写入，但 context.md 编译失败：{error}", file=sys.stderr)
+
+
+ORIGIN_RE = re.compile(r"^journal:[0-9TZ:.+-]{1,40}:[a-z0-9][a-z0-9-]*(#[0-9]{1,4})?$")
+
+
+def locate_record(origin: str) -> dict:
+    """按句柄找到那条记录；句柄非法、记录不存在都当作用法错误，不写任何东西。"""
+    if not ORIGIN_RE.match(origin or ""):
+        raise Usage(f"非法记录句柄 {origin!r}（形如 journal:<ts>:<source>）")
+    try:
+        lines = JOURNAL_FILE.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    records = []
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict):
+            records.append(rec)
+    for key, rec in zip(record_keys(records), records):
+        if key == origin:
+            return rec
+    raise Failure(f"找不到记录 {origin}")
+
+
+def cmd_candidate_mark(args) -> int:
+    """给一条记录打「建议升级」标记。只是建议：不写卡、不改资料；要不要升级由主人在页面上定。"""
+    if args.to not in CANDIDATE_TARGETS:
+        raise Usage(f"--to 须为 {'|'.join(CANDIDATE_TARGETS)}")
+    reason = one_line(args.reason, 300)
+    if not reason:
+        raise Usage("理由为空：标记要说明为什么值得升级")
+    if record_kind(locate_record(args.origin)) != "observation":
+        raise Failure("只有观察类记录可以标记；Git 记录与会话记录只供查阅，不参与升级")
+    ensure_dirs()
+    with file_lock(CANDIDATES_LOCK):
+        if args.origin in load_candidates():
+            print(f"{args.origin} 已有候选状态，跳过")
+            return 0
+        append_jsonl(CANDIDATES_FILE, [{"event": "mark", "origin": args.origin, "to": args.to,
+                                         "reason": reason, "at": utc_now()}])
+    print(f"marked {args.origin} -> {args.to}")
+    return 0
+
+
+def cmd_candidate_dismiss(args) -> int:
+    """主人认为这条不用升级：记下来，之后不再提示，蒸馏也不会再打。"""
+    locate_record(args.origin)
+    ensure_dirs()
+    with file_lock(CANDIDATES_LOCK):
+        current = load_candidates().get(args.origin)
+        if current and current["event"] == "dismiss":
+            print(f"{args.origin} 已忽略")
+            return 0
+        append_jsonl(CANDIDATES_FILE, [{"event": "dismiss", "origin": args.origin, "at": utc_now()}])
+    print(f"dismissed {args.origin}")
+    return 0
+
+
+def cmd_profile(args) -> int:
+    assert_legacy_write_allowed(BUTLER_ROOT)
+    body = read_body().strip() + "\n"
+    ensure_dirs()
+    with file_lock(PROPOSALS_LOCK):
+        write_profile(body)
+        journal("profile", "手动更新身份资料卡", "card://profile")
+    print("profile updated")
+    return 0
+
+
+def cmd_profile_append(args) -> int:
+    """把一条记录升级进身份资料卡：在锁内读最新内容再追加一行，不覆盖别处刚做的修改。"""
+    assert_legacy_write_allowed(BUTLER_ROOT)
+    line = one_line(read_body(), 600)
+    ensure_dirs()
+    with file_lock(PROPOSALS_LOCK):
+        current = PROFILE_FILE.read_text(encoding="utf-8").rstrip("\n") if PROFILE_FILE.exists() else ""
+        write_profile((current + "\n" if current else "") + f"- {line}\n")
+        journal("profile", f"从记录升级：追加到身份资料卡：{line[:80]}", "card://profile", origin=args.origin or "")
+    close_candidate(args.origin or "")
+    print("profile appended")
+    return 0
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="memory", description="管理 Butler 记忆卡与画像（正文经 stdin）")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    for name, fn in (("card-create", cmd_create), ("card-update", cmd_update)):
+        p = sub.add_parser(name)
+        p.add_argument("id")
+        p.add_argument("--title", required=True)
+        p.add_argument("--summary", default="")
+        if name == "card-create":
+            p.add_argument("--origin", default="", help="来自哪条记录：journal:<ts>:<source>")
+        p.set_defaults(fn=fn)
+    p = sub.add_parser("candidate-mark")
+    p.add_argument("origin")
+    p.add_argument("--to", required=True)
+    p.add_argument("--reason", required=True)
+    p.set_defaults(fn=cmd_candidate_mark)
+    p = sub.add_parser("candidate-dismiss")
+    p.add_argument("origin")
+    p.set_defaults(fn=cmd_candidate_dismiss)
+    p = sub.add_parser("card-order")
+    p.add_argument("kind")
+    p.set_defaults(fn=cmd_order)
+    p = sub.add_parser("card-delete")
+    p.add_argument("id")
+    p.set_defaults(fn=cmd_delete)
+    p = sub.add_parser("profile-set")
+    p.set_defaults(fn=cmd_profile)
+    p = sub.add_parser("profile-append")
+    p.add_argument("--origin", default="", help="来自哪条记录：journal:<ts>:<source>")
+    p.set_defaults(fn=cmd_profile_append)
+    args = ap.parse_args(argv)
+    try:
+        return args.fn(args)
+    except Usage as error:
+        print(f"memory: {error}", file=sys.stderr)
+        return 2
+    except (Failure, LegacyWriteBlocked) as error:
+        print(f"memory: {error}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

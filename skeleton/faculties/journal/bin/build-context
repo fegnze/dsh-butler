@@ -1,0 +1,49 @@
+#!/usr/bin/env python
+"""build-context — 编译 legacy 上下文；Wiki cutover 后禁止旧编译。"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _lib import BUTLER_ROOT, CONTEXT_MAX_CHARS, compile_context
+
+
+def store_mode() -> str:
+    marker = BUTLER_ROOT / "etc" / "knowledge-store.json"
+    if any(p.is_symlink() for p in (marker, *marker.parents)):
+        raise ValueError('knowledge store marker has a symlink path')
+    if not marker.exists():
+        return "legacy"
+    try:
+        data = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
+        raise ValueError("knowledge store marker is invalid") from exc
+    if (not isinstance(data, dict) or type(data.get("version")) is not int
+            or data.get("version") != 1 or data.get("active") not in ("legacy", "wiki")):
+        raise ValueError("knowledge store marker is invalid")
+    return data["active"]
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="build-context")
+    parser.add_argument("--max-chars", type=int, default=CONTEXT_MAX_CHARS)
+    parser.add_argument("--json", action="store_true")
+    args = parser.parse_args(argv)
+    if args.max_chars < 500:
+        print("build-context: --max-chars 至少 500", file=sys.stderr); return 2
+    try:
+        if store_mode() == "wiki":
+            print("build-context: Wiki 已接管知识与画像；禁止旧 context 编译，请由 Host Wiki loader 生成投影。", file=sys.stderr)
+            return 1
+        result = compile_context(args.max_chars)
+    except (FileNotFoundError, ValueError, OSError) as error:
+        print(f"build-context: {error}", file=sys.stderr); return 1
+    print(json.dumps(result, ensure_ascii=False) if args.json else f"{result['path']} ({result['chars']} 字，规则 {result['rules']} 张，知识 {result['knowledge']} 张)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

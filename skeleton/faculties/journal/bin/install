@@ -1,0 +1,124 @@
+#!/usr/bin/env python
+"""install — Butler 外部端点生命周期：安装 / 校验 / 卸载（均幂等）。
+
+端点：
+  claude     ~/.claude/CLAUDE.md 规则区块 + ~/.claude/settings.json hooks.Stop
+  codex      ~/.codex/AGENTS.md  规则区块 + ~/.codex/hooks.json      hooks.Stop
+  workbuddy  ~/.workbuddy/skills/butler-port/SKILL.md（sha256 校验）
+  git        butler.json endpoints.git.repos 中各仓库的 post-commit 区块
+
+只增删 Butler 自有内容；修改前完整预检全部目标文件，失败则零写入；
+写入为原子替换并保留 mode，写前备份到 <instance>/.state/endpoint-backups/。
+
+用法：
+  install --list [--json]
+  install --target <id> [--check|--uninstall] [--json]
+
+退出码：0 成功；1 失败（含 check 结果为 fail）；2 用法错误。
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _endpoints import IDS, EndpointError, lifecycle, list_status  # noqa: E402
+
+USAGE = ("用法: install --list [--json]\n"
+         "      install --target <id> [--check|--uninstall] [--json]\n"
+         f"      id: {', '.join(IDS)}")
+
+
+def usage(message: str) -> int:
+    print(f"install: {message}\n{USAGE}", file=sys.stderr)
+    return 2
+
+
+def parse(argv: list[str]):
+    opts = {"list": False, "json": False, "target": None, "action": "install"}
+    actions = []
+    i = 0
+    while i < len(argv):
+        arg = argv[i]
+        if arg == "--list":
+            opts["list"] = True
+        elif arg == "--json":
+            opts["json"] = True
+        elif arg == "--check":
+            actions.append("check")
+        elif arg == "--uninstall":
+            actions.append("uninstall")
+        elif arg == "--target":
+            if i + 1 >= len(argv) or argv[i + 1].startswith("--"):
+                raise ValueError("--target 缺参数")
+            opts["target"] = argv[i + 1]
+            i += 1
+        elif arg.startswith("--target="):
+            opts["target"] = arg.split("=", 1)[1]
+        elif arg in ("-h", "--help"):
+            raise LookupError
+        else:
+            raise ValueError(f"未知参数 {arg!r}")
+        i += 1
+    if len(actions) > 1:
+        raise ValueError("--check 与 --uninstall 只能选一个")
+    if actions:
+        opts["action"] = actions[0]
+    if opts["list"] and (opts["target"] or actions):
+        raise ValueError("--list 不能与 --target/--check/--uninstall 同用")
+    if not opts["list"] and not opts["target"]:
+        raise ValueError("需要 --list 或 --target <id>")
+    if opts["target"] is not None and opts["target"] not in IDS:
+        raise ValueError(f"未知 target {opts['target']!r}")
+    return opts
+
+
+def show(item: dict) -> str:
+    version = f"v{item['version']}" if item.get("version") is not None else "-"
+    line = f"  {item['id']:<10} {item['status']:<8} {version}"
+    for error in item.get("errors", []):
+        line += f"\n      ! {error}"
+    return line
+
+
+def main(argv: list[str]) -> int:
+    try:
+        opts = parse(argv)
+    except LookupError:
+        print(__doc__)
+        return 0
+    except ValueError as error:
+        return usage(str(error))
+
+    if opts["list"]:
+        items = list_status()
+        if opts["json"]:
+            print(json.dumps(items, ensure_ascii=False, indent=2))
+        else:
+            print("Butler 端点：")
+            for item in items:
+                print(show(item))
+        return 0
+
+    target, action = opts["target"], opts["action"]
+    try:
+        result = lifecycle(target, action)
+    except (EndpointError, OSError) as error:
+        print(f"install: [{target}] {action} 失败: {error}", file=sys.stderr)
+        return 1
+    if opts["json"]:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(f"[{target}] {action}: {result['status']}")
+        for error in result.get("errors", []):
+            print(f"  ! {error}")
+    if action == "install":
+        return 0 if result["status"] == "ok" else 1
+    if action == "uninstall":
+        return 0 if result["status"] in ("missing", "legacy") else 1
+    return 1 if result["status"] == "fail" else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

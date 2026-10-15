@@ -1,0 +1,140 @@
+#!/usr/bin/env python
+"""distill — 为蒸馏会话取出 journal 游标之后的素材；游标只在显式 --advance 时前移。
+
+用法：
+  distill [--limit N] [--max-chars M] [--json]   打印 [from, to) 区间里「观察」类记录（只读）
+  distill --advance <to>                          处理完成后把游标前移到 to
+
+只给观察：git 提交与会话回合标记只供查阅，不在这里出现（但游标照常越过它们）。每条带 `key`，
+即页面上记录卡的句柄。
+
+蒸馏本身由 butler 预设会话中的模型完成：读本命令输出 → 对值得升级的记录用
+`memory candidate-mark <key> --to knowledge|rule|profile --reason …` 打标记（宁缺毋滥，默认不打）→
+`distill --advance <to>`。蒸馏不写卡，也不写提案：升级由主人在页面上确认。游标存于 self/etc/cursor.json 的 distill 字段（journal 行号）。
+取素材前先跑一次同目录的 run，把暂存区里还没合并的观察并入 journal（run 仍是 journal 的唯一写者；失败只告警，照常读已有 journal）。
+游标只能前移且不超过 journal 当前行数；不前移则下次重复给出同一批素材（宁可重读不漏读）。
+退出码：0 成功；1 执行失败；2 用法错误。
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _lib import (ETC_DIR, JOURNAL_FILE, ensure_dirs, file_lock,  # noqa: E402
+                  load_candidates, load_json, parse_jsonl_lines, record_keys, record_kind, save_json)
+
+CURSOR_FILE = ETC_DIR / "cursor.json"
+CURSOR_LOCK = ETC_DIR / ".cursor.lock"
+KEEP = ("ts", "source", "type", "tags", "text", "ref", "workspace", "sessionId", "turn",
+        "filesTouched", "toolsUsed", "gitCommits", "failed")
+
+
+def journal_lines() -> list[str]:
+    try:
+        return [line for line in JOURNAL_FILE.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except FileNotFoundError:
+        return []
+
+
+def cursor() -> int:
+    try:
+        value = load_json(CURSOR_FILE, {}).get("distill", 0)
+    except (json.JSONDecodeError, AttributeError):
+        raise SystemExit(_fail(f"{CURSOR_FILE.name} 损坏，需人工检查"))
+    return value if isinstance(value, int) and value >= 0 else 0
+
+
+def _own_trace(rec: dict) -> bool:
+    """管家自己写卡、改资料留下的 decision 是升级的后果，不是新信息；让蒸馏读到只会循环推荐。"""
+    return rec.get("source") == "butler" and "memory" in (rec.get("tags") or [])
+
+
+def _parses(line: str) -> bool:
+    try:
+        return isinstance(json.loads(line), dict)
+    except ValueError:
+        return False
+
+
+def _fail(message: str, code: int = 1) -> int:
+    print(f"distill: {message}", file=sys.stderr)
+    return code
+
+
+def _merge_spool() -> None:
+    """取素材前先把暂存区并入 journal，否则各端刚上报的观察要等有人手动合并才会被蒸馏看到。"""
+    try:
+        result = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "run")],
+                                capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print(f"distill: 合并暂存区失败，按已有 journal 继续：{error}", file=sys.stderr)
+        return
+    if result.returncode != 0:
+        print(f"distill: 合并暂存区退出码 {result.returncode}，按已有 journal 继续：{result.stderr.strip()[:300]}", file=sys.stderr)
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="distill", description=__doc__.splitlines()[0])
+    ap.add_argument("--limit", type=int, default=50)
+    ap.add_argument("--max-chars", type=int, default=600, help="每条 text 截断长度")
+    ap.add_argument("--advance", type=int)
+    ap.add_argument("--json", action="store_true")
+    try:
+        args = ap.parse_args(argv)
+    except SystemExit as exc:
+        return 2 if exc.code else 0
+    if args.limit < 1 or args.max_chars < 1:
+        return _fail("--limit 与 --max-chars 必须为正", 2)
+    ensure_dirs()
+    if args.advance is None:
+        _merge_spool()
+    with file_lock(CURSOR_LOCK):
+        start = cursor()
+        lines = journal_lines()
+        if args.advance is not None:
+            if args.advance < start or args.advance > len(lines):
+                return _fail(f"--advance 必须在 [{start}, {len(lines)}] 内", 2)
+            data = load_json(CURSOR_FILE, {})
+            data["distill"] = args.advance
+            save_json(CURSOR_FILE, data)
+            print(f"distill 游标 {start} → {args.advance}")
+            return 0
+    end = min(len(lines), start + args.limit)
+    # 句柄按整本 journal 的顺序数，不能只数这一批。
+    valid = []
+    for number, line in enumerate(lines):
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(rec, dict):
+            valid.append((number, rec))
+    keys = record_keys([rec for _, rec in valid])
+    bad = sum(1 for line in lines[start:end] if not _parses(line))
+    marked = load_candidates()
+    out = []
+    for (number, rec), key in zip(valid, keys):
+        if not start <= number < end or record_kind(rec) != "observation" or key in marked or _own_trace(rec):
+            continue
+        item = {"key": key, **{k: rec[k] for k in KEEP if k in rec}}
+        if isinstance(item.get("text"), str):
+            item["text"] = item["text"][:args.max_chars]
+        out.append(item)
+    payload = {"from": start, "to": end, "total": len(lines), "bad": bad, "records": out}
+    if args.json:
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(f"# journal [{start}, {end}) / {len(lines)}" + (f"，{bad} 行损坏" if bad else ""))
+        for item in out:
+            print(f"- {item['key']} [{item.get('source', '?')}/{item.get('type', '?')}] "
+                  f"{item.get('text', '')}" + (f" <{item['ref']}>" if item.get("ref") else ""))
+        print(f"\n处理完成后运行：distill --advance {end}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,113 @@
+#!/usr/bin/env python
+"""run — 心跳：把 spool 各源文件合并进 journal 总账。
+
+run 是 journal 的唯一写者。它只在源锁内完成当前 spool 文件的原子改名，
+随后在锁外处理已认领的 batch；intake 可以立即向新的同名 jsonl 追加。
+损坏行不丢弃：隔离到 journal/quarantine-*.jsonl 留待人工裁决。
+
+用法：run [--dry-run]     （--dry-run 只统计，不落盘、不清 spool）
+"""
+from __future__ import annotations
+
+import os
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _lib import compile_context  # noqa: E402
+from _lib import (JOURNAL_DIR, JOURNAL_FILE, JOURNAL_LOCK, SPOOL_DIR,
+                  append_jsonl, ensure_dirs, file_lock, parse_jsonl_lines,
+                  utc_now)
+
+
+def main(argv: list[str]) -> int:
+    dry = "--dry-run" in argv
+    ensure_dirs()
+    merged_total, quarantined, sources = 0, 0, []
+    pending: list[Path] = []
+    if dry:
+        pending.extend(sorted(SPOOL_DIR.glob("*.jsonl")))
+        pending.extend(sorted(SPOOL_DIR.glob("*.batch")))
+    else:
+        pending.extend(sorted(SPOOL_DIR.glob("*.batch")))
+        for spool_file in sorted(SPOOL_DIR.glob("*.jsonl")):
+            batch = claim_spool(spool_file)
+            if batch is not None:
+                pending.append(batch)
+
+    for batch in pending:
+        result = process_batch(batch, dry=dry)
+        if result is None:
+            continue
+        records, bad, source = result
+        merged_total += len(records)
+        quarantined += bad
+        sources.append(f"{source}={len(records)}"
+                       + (f"(+{bad}损坏已隔离)" if bad else ""))
+
+    if not dry:
+        # 每次合并后刷新注入用的 context.md；persona 缺失时只告警。
+        try:
+            compile_context()
+        except (OSError, ValueError) as error:
+            print(f"Butler run: context.md 未刷新：{error}", file=sys.stderr)
+    mode = " [dry-run]" if dry else ""
+    print(f"Butler run{mode}: merged {merged_total} records; "
+          + ("; ".join(sources) if sources else "spool 为空"))
+    return 0
+
+
+def process_batch(batch: Path, *, dry: bool) -> tuple[list[dict], int, str] | None:
+    """Parse one file; serialize only the durable journal handoff."""
+    source = batch.name.split(".", 1)[0]
+    batch_lock = SPOOL_DIR / f".{batch.name}.lock"
+    with file_lock(batch_lock):
+        if not batch.exists():
+            return None
+        if dry and batch.suffix == ".jsonl":
+            with file_lock(SPOOL_DIR / f"{source}.lock"):
+                if not batch.exists():
+                    return None
+                raw = non_empty_lines(batch)
+        else:
+            raw = non_empty_lines(batch)
+        records, bad = parse_jsonl_lines(raw)
+        if dry:
+            return records, bad, source
+        with file_lock(JOURNAL_LOCK):
+            if records:
+                append_jsonl(JOURNAL_FILE, records)
+            if bad:
+                q = JOURNAL_DIR / f"quarantine-{source}-{os.getpid()}-{time.time_ns()}.jsonl"
+                append_jsonl(q, [line for line in raw if line.strip() and not _is_valid(line)])
+            batch.unlink(missing_ok=True)
+        return records, bad, source
+
+
+def claim_spool(spool_file: Path) -> Path | None:
+    """Atomically hand one source's current file to this run invocation."""
+    source = spool_file.stem
+    with file_lock(SPOOL_DIR / f"{source}.lock"):
+        if not spool_file.exists():
+            return None
+        batch = SPOOL_DIR / f"{source}.{os.getpid()}.{time.time_ns()}.batch"
+        os.replace(spool_file, batch)
+        return batch
+
+
+def non_empty_lines(path: Path) -> list[str]:
+    return [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def _is_valid(line: str) -> bool:
+    import json
+    try:
+        json.loads(line)
+        return True
+    except json.JSONDecodeError:
+        return False
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

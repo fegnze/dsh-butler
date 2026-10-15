@@ -1,0 +1,118 @@
+#!/usr/bin/env python
+"""report — 汇报素材与落盘：gather 汇总事实，write 写入 digest 与 outbox。
+
+用法：
+  report gather daily|weekly|audit [--json]          只读：时间窗内 journal、待决提案数、spool 积压
+  report write daily|weekly|audit [--date YYYY-MM-DD] [--json]   正文读 stdin
+
+成文由 butler 预设会话中的模型完成：gather → 写报告 → write。
+write 原子写 self/digests/<kind>-<date>.md 与 self/outbox/<kind>-<date>.md（同名覆盖）。
+退出码：0 成功；1 执行失败；2 用法错误。
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _lib import (DIGESTS_DIR, JOURNAL_FILE, OUTBOX_DIR, SPOOL_DIR,  # noqa: E402
+                  ensure_dirs, load_proposals, parse_jsonl_lines, today_local)
+
+KINDS = {"daily": 1, "weekly": 7, "audit": 7}
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+
+def _usage(message: str) -> int:
+    print(f"report: {message}", file=sys.stderr)
+    return 2
+
+
+def _parse_ts(value) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def gather(kind: str) -> dict:
+    since = datetime.now(timezone.utc) - timedelta(days=KINDS[kind])
+    try:
+        raw = JOURNAL_FILE.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        raw = []
+    records, bad = parse_jsonl_lines(raw)
+    window = []
+    for rec in records:
+        ts = _parse_ts(rec.get("ts")) if isinstance(rec, dict) else None
+        if ts and ts.tzinfo and ts >= since:
+            window.append({k: rec[k] for k in ("ts", "source", "type", "text", "ref") if k in rec})
+    pending = sum(1 for p in load_proposals()[0].values() if p.get("status") == "pending")
+    queued = 0
+    if SPOOL_DIR.exists():
+        for path in SPOOL_DIR.glob("*.jsonl"):
+            queued += sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+    return {"kind": kind, "since": since.strftime("%Y-%m-%dT%H:%M:%SZ"), "journal": window,
+            "journalBad": bad, "pending": pending, "spoolQueued": queued}
+
+
+def _atomic(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="report", description=__doc__.splitlines()[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    g = sub.add_parser("gather")
+    g.add_argument("kind")
+    w = sub.add_parser("write")
+    w.add_argument("kind")
+    w.add_argument("--date")
+    for parser in (g, w):
+        parser.add_argument("--json", action="store_true")
+    try:
+        args = ap.parse_args(argv)
+    except SystemExit as exc:
+        return 2 if exc.code else 0
+    if args.kind not in KINDS:
+        return _usage(f"kind 必须是 {'|'.join(KINDS)}")
+    ensure_dirs()
+    if args.cmd == "gather":
+        data = gather(args.kind)
+        if args.json:
+            print(json.dumps(data, ensure_ascii=False, indent=2))
+        else:
+            print(f"# {args.kind} 素材（{data['since']} 起）\n待决提案 {data['pending']}，spool 积压 {data['spoolQueued']}")
+            for rec in data["journal"]:
+                print(f"- {rec.get('ts')} [{rec.get('source')}/{rec.get('type')}] {rec.get('text', '')[:200]}")
+        return 0
+    date = args.date or today_local()
+    if not DATE_RE.match(date):
+        return _usage("--date 必须是 YYYY-MM-DD")
+    body = sys.stdin.read().strip()
+    if not body:
+        return _usage("报告正文（stdin）不能为空")
+    name = f"{args.kind}-{date}.md"
+    text = body + "\n"
+    try:
+        _atomic(DIGESTS_DIR / name, text)
+        _atomic(OUTBOX_DIR / name, text)
+    except OSError as exc:
+        print(f"report: 写入失败 {exc}", file=sys.stderr)
+        return 1
+    result = {"name": name, "digest": str(DIGESTS_DIR / name), "outbox": str(OUTBOX_DIR / name)}
+    print(json.dumps(result, ensure_ascii=False) if args.json else f"已写入 {name}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

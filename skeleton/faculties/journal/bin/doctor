@@ -1,0 +1,119 @@
+#!/usr/bin/env python
+"""doctor — Butler 巡检：骨架完整性、外部端点健康、spool 积压。
+
+检查项：
+  骨架    journal/画像/注册表是否齐全、注册表是否可解析；旧版合卷未拆分时告警
+  端点    逐个调用 _endpoints.list_status()：ok=PASS，未安装=INFO，legacy=WARN，fail=FAIL
+  积压    spool 待合并行数（>0 只提示 INFO：蒸馏与记忆页取数前会自动 run）
+
+用法：doctor [--quiet]     退出码：存在 FAIL 时为 1，否则 0。
+"""
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _lib import (BUTLER_ROOT, LEGACY_IRON_FILE, JOURNAL_FILE, PROFILE_FILE,  # noqa: E402
+                  REGISTRY_FILE, SPOOL_DIR, parse_jsonl_lines)
+
+FAILS = 0
+ENDPOINT_IDS = ("claude", "codex", "workbuddy", "git")
+LEVEL = {"ok": "PASS", "missing": "INFO", "legacy": "WARN", "fail": "FAIL"}
+
+
+def report(level: str, msg: str) -> None:
+    global FAILS
+    print(f"[{level}] {msg}")
+    if level == "FAIL":
+        FAILS += 1
+
+
+def rel(path: Path) -> str:
+    try:
+        return str(path.relative_to(BUTLER_ROOT))
+    except ValueError:
+        return str(path)
+
+
+def check_registry() -> None:
+    try:
+        data = json.loads(REGISTRY_FILE.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as error:
+        report("FAIL", f"注册表不可解析: {rel(REGISTRY_FILE)}: {error}")
+        return
+    if not isinstance(data, dict) or not isinstance(data.get("targets", {}), dict):
+        report("WARN", f"注册表形状异常（应为 {{\"targets\": {{...}}}}）: {rel(REGISTRY_FILE)}")
+    else:
+        report("PASS", "注册表 JSON 可解析")
+
+
+def check_endpoints() -> None:
+    try:
+        from _endpoints import list_status
+        items = list_status()
+    except Exception as error:  # 巡检本身不得崩溃
+        for name in ENDPOINT_IDS:
+            report("FAIL", f"端点 {name} 状态读取失败: {type(error).__name__}: {error}")
+        return
+    seen = set()
+    for item in items:
+        name = item.get("id")
+        seen.add(name)
+        state = item.get("status")
+        level = LEVEL.get(state, "FAIL")
+        version = f" v{item['version']}" if item.get("version") is not None else ""
+        if state == "ok":
+            detail = f"已安装{version}，健康"
+        elif state == "missing":
+            detail = f"未安装（install --target {name}）"
+        elif state == "legacy":
+            detail = f"旧版或未登记的 Butler 端点{version}，运行 install --target {name} 升级"
+        else:
+            detail = "异常"
+        errors = item.get("errors") or []
+        if errors:
+            detail += "：" + "；".join(str(e) for e in errors)
+        report(level, f"端点 {name} {detail}")
+    for name in ENDPOINT_IDS:
+        if name not in seen:
+            report("FAIL", f"端点 {name} 无状态")
+
+
+def check_backlog() -> None:
+    backlog = 0
+    try:
+        for spool in SPOOL_DIR.glob("*.jsonl"):
+            raw = [line for line in spool.read_text(encoding="utf-8").splitlines() if line.strip()]
+            recs, _ = parse_jsonl_lines(raw)
+            backlog += len(recs)
+    except (OSError, UnicodeDecodeError) as error:
+        report("WARN", f"spool 读取失败: {error}")
+        return
+    if backlog:
+        report("INFO", f"暂存区有 {backlog} 条观察尚未合并（蒸馏或打开记忆页时会自动合并）")
+    else:
+        report("PASS", "spool 无积压")
+
+
+def main(argv: list[str]) -> int:
+    quiet = "--quiet" in argv
+    for path in (JOURNAL_FILE, PROFILE_FILE, REGISTRY_FILE):
+        report("PASS" if path.exists() else "FAIL", f"骨架 {rel(path)}")
+    if LEGACY_IRON_FILE.exists():
+        report("WARN", f"旧版合卷 {rel(LEGACY_IRON_FILE)} 未拆分（跑 migrate-rules 拆成 rules/ 规则卡）")
+    check_registry()
+    check_endpoints()
+    check_backlog()
+    if not quiet and JOURNAL_FILE.exists():
+        with open(JOURNAL_FILE, encoding="utf-8", errors="replace") as handle:
+            count = sum(1 for _ in handle)
+        report("INFO", f"journal 共 {count} 条")
+    return 1 if FAILS else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

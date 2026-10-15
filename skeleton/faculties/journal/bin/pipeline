@@ -1,0 +1,66 @@
+#!/usr/bin/env python
+"""Butler pipeline: one bounded JSON request on stdin; faculty-owned persistence."""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+MAX_INPUT_BYTES = 2 * 1024 * 1024
+
+
+def main() -> int:
+    try:
+        raw = sys.stdin.buffer.read(MAX_INPUT_BYTES + 1)
+        if len(raw) > MAX_INPUT_BYTES:
+            raise ValueError('request exceeds 2 MiB')
+        request = json.loads(raw)
+        if not isinstance(request, dict) or set(request) - {'action', 'args'}:
+            raise ValueError('expected {action,args}')
+        action, args = request.get('action'), request.get('args', {})
+        if not isinstance(action, str) or not isinstance(args, dict):
+            raise ValueError('action must be string and args must be object')
+        root_value = os.environ.get('BUTLER_SELF_ROOT')
+        if not root_value:
+            raise ValueError('BUTLER_SELF_ROOT is required; no implicit personal directory')
+        from _pipeline_store import Store
+        from _pipeline_cards import Cards
+        root = Path(root_value).expanduser()
+        store = Store(root)
+        cards = Cards(root, evidence_loader=lambda source_id: store.handle('sessions.read', {'id': source_id}))
+        if action in ('migration.plan', 'migration.rollback-plan'):
+            # A migration preview must not create a lock, directory or repair data.
+            from _pipeline_migration import Migration
+            data = Migration(root).handle(action, args)
+        else:
+            with store.lock():
+                cards.recover()
+                if action == 'migration.stage-review':
+                    from _pipeline_migration import Migration
+                    data = Migration(root).stage_review(args)
+                elif action in ('migration.apply', 'migration.activate-empty'):
+                    from _pipeline_migration import Migration
+                    data = Migration(root).handle(action, args)
+                elif action.startswith(('sessions.', 'distill.')):
+                    if action == 'distill.claim':
+                        # Distillation reads formal cards next; refresh their validity first (idempotent).
+                        cards.maintain()
+                    data = store.handle(action, args)
+                elif action.startswith(('candidates.', 'cards.', 'validity.')):
+                    data = cards.handle(action, args)
+                else:
+                    raise ValueError('unknown action')
+        print(json.dumps({'ok': True, 'data': data}, ensure_ascii=False))
+        return 0
+    except Exception as error:
+        code = getattr(error, 'code', 'invalid_request' if isinstance(error, (ValueError, TypeError)) else 'pipeline_failed')
+        details = getattr(error, 'details', {})
+        if not isinstance(details, dict):
+            details = {}
+        print(json.dumps({'ok': False, 'error': {**details, 'code': code, 'message': str(error)}}, ensure_ascii=False))
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -1,0 +1,9 @@
+{
+  "scanRoots": ["tools", "services", "faculties"],
+  "selfRoot": "self",
+  "notification": { "enabled": true },
+  "endpoints": {},
+  "collector": { "enabled": true, "workspaces": [], "excludePresets": ["butler"], "debounceMs": 2000 },
+  "inject": { "enabled": true, "workspaces": [], "excludePresets": ["butler"], "maxChars": 8000 },
+  "automations": {}
+}

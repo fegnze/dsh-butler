@@ -1,0 +1,310 @@
+{
+  "schemaVersion": 1,
+  "kind": "faculty",
+  "id": "journal",
+  "name": "记忆与观察",
+  "description": "记录各 Agent 的观察，合并成长期记忆，提出需要你批准的新规则，并把确认过的知识注入各 Agent。",
+  "commands": [
+    {
+      "id": "intake",
+      "description": "手动记一条观察，先放进暂存区",
+      "exec": [
+        "python",
+        "./bin/intake"
+      ],
+      "effect": "write",
+      "args": [
+        {
+          "name": "source",
+          "pattern": "[a-z0-9][a-z0-9-]*",
+          "required": true
+        },
+        {
+          "name": "type",
+          "pattern": "note|decision|fact|milestone|error|session"
+        },
+        {
+          "name": "tag",
+          "pattern": "[^\\u0000-\\u001f]{1,200}"
+        },
+        {
+          "name": "text",
+          "pattern": "[\\s\\S]{1,2000}",
+          "required": true,
+          "stdin": true
+        }
+      ]
+    },
+    {
+      "id": "run",
+      "description": "把暂存区的观察合并进长期记忆",
+      "exec": [
+        "python",
+        "./bin/run"
+      ],
+      "effect": "write"
+    },
+    {
+      "id": "install",
+      "description": "给各 Agent 安装或更新 Butler 接入点",
+      "exec": [
+        "python",
+        "./bin/install"
+      ],
+      "effect": "external"
+    },
+    {
+      "id": "apply",
+      "description": "批准提案：写规则卡/知识卡/画像并记 decision",
+      "exec": [
+        "python",
+        "./bin/proposals",
+        "apply",
+        "--confirmed"
+      ],
+      "effect": "write",
+      "args": [
+        {
+          "name": "id",
+          "pattern": "p-[0-9a-z]{1,40}",
+          "required": true,
+          "positional": true
+        }
+      ]
+    },
+    {
+      "id": "reject",
+      "description": "拒绝提案（理由可选）",
+      "exec": [
+        "python",
+        "./bin/proposals",
+        "reject"
+      ],
+      "effect": "write",
+      "args": [
+        {
+          "name": "id",
+          "pattern": "p-[0-9a-z]{1,40}",
+          "required": true,
+          "positional": true
+        },
+        {
+          "name": "reason",
+          "pattern": "[^\\u0000-\\u001f]{1,500}",
+          "required": false
+        }
+      ]
+    },
+    {
+      "id": "card-create",
+      "description": "手动新建一张规则卡或知识卡；从记录升级时带上来源记录",
+      "exec": [
+        "python",
+        "./bin/memory",
+        "card-create"
+      ],
+      "effect": "write",
+      "args": [
+        {
+          "name": "id",
+          "pattern": "(rule|knowledge)/[a-z0-9][a-z0-9-]{0,63}",
+          "required": true,
+          "positional": true
+        },
+        {
+          "name": "title",
+          "pattern": "[^\\u0000-\\u001f]{1,200}",
+          "required": true
+        },
+        {
+          "name": "summary",
+          "pattern": "[^\\u0000-\\u001f]{1,300}"
+        },
+        {
+          "name": "origin",
+          "pattern": "journal:[0-9TZ:.+-]{1,40}:[a-z0-9][a-z0-9-]*(#[0-9]{1,4})?"
+        },
+        {
+          "name": "body",
+          "pattern": "[\\s\\S]{1,60000}",
+          "required": true,
+          "stdin": true
+        }
+      ]
+    },
+    {
+      "id": "card-update",
+      "description": "修改一张卡的标题、摘要和正文",
+      "exec": [
+        "python",
+        "./bin/memory",
+        "card-update"
+      ],
+      "effect": "write",
+      "args": [
+        {
+          "name": "id",
+          "pattern": "(rule|knowledge)/[a-z0-9][a-z0-9-]{0,63}",
+          "required": true,
+          "positional": true
+        },
+        {
+          "name": "title",
+          "pattern": "[^\\u0000-\\u001f]{1,200}",
+          "required": true
+        },
+        {
+          "name": "summary",
+          "pattern": "[^\\u0000-\\u001f]{1,300}"
+        },
+        {
+          "name": "body",
+          "pattern": "[\\s\\S]{1,60000}",
+          "required": true,
+          "stdin": true
+        }
+      ]
+    },
+    {
+      "id": "card-delete",
+      "description": "删除一张卡（移入 trash，可找回）",
+      "exec": [
+        "python",
+        "./bin/memory",
+        "card-delete"
+      ],
+      "effect": "write",
+      "args": [
+        {
+          "name": "id",
+          "pattern": "(rule|knowledge)/[a-z0-9][a-z0-9-]{0,63}",
+          "required": true,
+          "positional": true
+        }
+      ]
+    },
+    {
+      "id": "card-order",
+      "description": "记下一个分区里卡片的顺序（拖动排序）",
+      "exec": [
+        "python",
+        "./bin/memory",
+        "card-order"
+      ],
+      "effect": "write",
+      "args": [
+        {
+          "name": "kind",
+          "pattern": "rule|knowledge",
+          "required": true,
+          "positional": true
+        },
+        {
+          "name": "slugs",
+          "pattern": "[a-z0-9][a-z0-9-]{0,63}(\\n[a-z0-9][a-z0-9-]{0,63}){0,399}",
+          "required": true,
+          "stdin": true
+        }
+      ]
+    },
+    {
+      "id": "candidate-dismiss",
+      "description": "这条记录不用升级：记下来，之后不再提示，蒸馏也不会再标",
+      "exec": [
+        "python",
+        "./bin/memory",
+        "candidate-dismiss"
+      ],
+      "effect": "write",
+      "args": [
+        {
+          "name": "origin",
+          "pattern": "journal:[0-9TZ:.+-]{1,40}:[a-z0-9][a-z0-9-]*(#[0-9]{1,4})?",
+          "required": true,
+          "positional": true
+        }
+      ]
+    },
+    {
+      "id": "profile-set",
+      "description": "整体替换身份资料卡",
+      "exec": [
+        "python",
+        "./bin/memory",
+        "profile-set"
+      ],
+      "effect": "write",
+      "args": [
+        {
+          "name": "body",
+          "pattern": "[\\s\\S]{1,20000}",
+          "required": true,
+          "stdin": true
+        }
+      ]
+    },
+    {
+      "id": "profile-append",
+      "description": "把一条记录升级进身份资料卡（追加一行，并记下来源记录）",
+      "exec": [
+        "python",
+        "./bin/memory",
+        "profile-append"
+      ],
+      "effect": "write",
+      "args": [
+        {
+          "name": "origin",
+          "pattern": "journal:[0-9TZ:.+-]{1,40}:[a-z0-9][a-z0-9-]*(#[0-9]{1,4})?"
+        },
+        {
+          "name": "line",
+          "pattern": "[\\s\\S]{1,2000}",
+          "required": true,
+          "stdin": true
+        }
+      ]
+    }
+  ],
+  "reports": [
+    {
+      "id": "doctor",
+      "name": "端点巡检",
+      "exec": [
+        "python",
+        "./bin/doctor"
+      ],
+      "shape": "status"
+    },
+    {
+      "id": "card",
+      "name": "画像与卡片索引",
+      "exec": [
+        "python",
+        "./bin/card"
+      ],
+      "shape": "markdown"
+    },
+    {
+      "id": "proposals",
+      "name": "待决提案",
+      "exec": [
+        "python",
+        "./bin/proposals",
+        "list",
+        "--status",
+        "pending"
+      ],
+      "shape": "list"
+    },
+    {
+      "id": "distill",
+      "name": "蒸馏素材",
+      "exec": [
+        "python",
+        "./bin/distill"
+      ],
+      "shape": "markdown"
+    }
+  ]
+}

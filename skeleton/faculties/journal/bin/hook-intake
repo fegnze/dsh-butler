@@ -1,0 +1,100 @@
+#!/usr/bin/env python
+"""hook-intake — 外部端点 hook 适配器：把一次回合结束/提交转成一条观察，交给同目录 intake。
+
+用法：
+  hook-intake --source <claude|codex|...>   stdin 读宿主 hook JSON，需含 transcript_path
+  hook-intake --source git --git            在仓库内（post-commit）读取最新提交
+
+规则：
+  - source 只允许 [a-z0-9-]。
+  - stdin 非法 JSON / 不是对象 / 缺 transcript_path → 退出码 2，写 stderr，不写观察。
+  - 不向 stdout 输出任何内容（宿主可能解析 hook stdout）。
+  - 安装器在命令末尾追加 `|| true`，失败不阻塞宿主。
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+SOURCE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+INTAKE = Path(__file__).resolve().parent / "intake"
+TIMEOUT = 10
+
+
+def fail(message: str) -> int:
+    print(f"hook-intake: {message}", file=sys.stderr)
+    return 2
+
+
+def git_observation() -> tuple[list[str], str] | str:
+    def run(args):
+        result = subprocess.run(["git", *args], capture_output=True, text=True, timeout=TIMEOUT)
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or f"git {' '.join(args)} 失败")
+        return result.stdout.strip()
+
+    try:
+        top = run(["rev-parse", "--show-toplevel"])
+        head = run(["log", "-1", "--format=%H%x09%s"])
+    except (OSError, subprocess.TimeoutExpired, RuntimeError) as error:
+        return f"读取 git 提交失败: {error}"
+    sha, _, subject = head.partition("\t")
+    if not re.fullmatch(r"[0-9a-f]{7,64}", sha):
+        return "git log 输出异常"
+    args = ["--type", "note", "--ref", f"git://{top}@{sha}", "--workspace", top,
+            "--commits", sha, "--tag", "git-commit"]
+    return args, f"git 提交 {Path(top).name}@{sha[:12]}: {subject}"[:500]
+
+
+def hook_observation(source: str) -> tuple[list[str], str] | str:
+    raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as error:
+        return f"stdin 不是合法 JSON: {error}"
+    if not isinstance(payload, dict):
+        return "stdin JSON 必须是对象"
+    transcript = payload.get("transcript_path")
+    if not isinstance(transcript, str) or not transcript.strip():
+        return "hook JSON 缺少 transcript_path"
+    args = ["--type", "session", "--ref", transcript.strip()[:500], "--tag", "agent-hook"]
+    session = payload.get("session_id")
+    if isinstance(session, str) and session.strip():
+        args += ["--session-id", session.strip()[:240]]
+    cwd = payload.get("cwd")
+    text = f"{source} 回合结束"
+    if isinstance(cwd, str) and cwd.strip():
+        args += ["--workspace", cwd.strip()[:500]]
+        text += f"（{cwd.strip()[:300]}）"
+    return args, text
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(prog="hook-intake", description=__doc__.splitlines()[0])
+    ap.add_argument("--source", required=True)
+    ap.add_argument("--git", action="store_true", help="post-commit 模式：读取 HEAD 提交")
+    args = ap.parse_args(argv)
+    source = args.source
+    if not SOURCE_RE.match(source):
+        return fail(f"非法 source {source!r}（须匹配 [a-z0-9-]）")
+    observed = git_observation() if args.git else hook_observation(source)
+    if isinstance(observed, str):
+        return fail(observed)
+    extra, text = observed
+    try:
+        result = subprocess.run([sys.executable, str(INTAKE), "--source", source, *extra, "--", text],
+                                capture_output=True, text=True, timeout=TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        return fail(f"调用 intake 失败: {error}")
+    if result.returncode != 0:
+        sys.stderr.write(result.stderr)
+        return fail(f"intake 退出码 {result.returncode}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

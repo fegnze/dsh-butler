@@ -1,0 +1,246 @@
+#!/usr/bin/env python
+"""proposals — 蒸馏提案的唯一读写入口：add / list / apply / reject。
+
+用法：
+  proposals add --kind <k> --title <t> [--slug <s>] [--find <原文>] [--summary <一句话>] [--evidence <ref>]... [--json]   正文读 stdin
+  proposals list [--status pending|applied|rejected] [--json]
+  proposals apply <id> --confirmed [--json]
+  proposals reject <id> [--reason <理由>] [--json]   理由可选：沉淀宁缺毋滥，否决不设门槛
+
+kind：
+  rule       规则卡 rules/<slug>.md：无 --find 时新建（已存在则拒绝）；有 --find 时在该卡中替换唯一一处
+  knowledge  知识卡 knowledge/<slug>.md：规则同上
+  persona    在 persona/profile.md 中把唯一一处 --find 替换为正文
+  fact       追加一条 journal type=fact
+  noise      只关闭提案
+  新建的卡带 front matter（title/summary/proposal/approvedAt）；--summary 缺省取正文首个段落行。
+  卡片是独立文件，会话只注入画像 + 索引，正文由 card <kind>/<slug> 按需读取。
+
+规则：
+  - 提案存于 self/proposals.jsonl，一行一事件：创建行 + 状态变更行，按 id 折叠；
+    损坏行保留在文件中并在 stderr 计数，不静默丢弃。
+  - apply 必须 --confirmed；目标写入与 journal decision 同在 proposals 锁内；
+    --find 不存在或出现多于一次 → 失败且零写入，提案保持 pending。
+  - rules/ knowledge/ persona/ 只经本命令写入（rules/ 首次由 migrate-rules 从旧版合卷拆分）。
+退出码：0 成功；1 执行失败；2 用法错误。
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import secrets
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _legacy_guard import LegacyWriteBlocked, assert_legacy_write_allowed
+from _lib import (BUTLER_ROOT, CARD_KINDS, JOURNAL_FILE, JOURNAL_LOCK, PROFILE_FILE,  # noqa: E402
+                  PROPOSALS_FILE, PROPOSALS_LOCK, SLUG_RE, append_jsonl, atomic_write,
+                  compile_context, ensure_dirs, file_lock, load_proposals, render_card,
+                  utc_now)
+KINDS = ("rule", "knowledge", "persona", "fact", "noise")
+
+
+class Usage(Exception):
+    pass
+
+
+class Failure(Exception):
+    pass
+
+
+def load() -> dict[str, dict]:
+    """按 id 折叠事件（保持创建顺序）；损坏行计数报 stderr。"""
+    folded, bad = load_proposals()
+    if bad:
+        print(f"proposals: {bad} 行损坏，已保留在 {PROPOSALS_FILE.name} 中未解析", file=sys.stderr)
+    return folded
+
+
+def emit(value, as_json: bool, human: str) -> None:
+    print(json.dumps(value, ensure_ascii=False, indent=2) if as_json else human)
+
+
+def cmd_add(args) -> int:
+    body = sys.stdin.read().strip()
+    title = (args.title or "").strip()
+    if args.kind not in KINDS:
+        raise Usage(f"kind 必须是 {'|'.join(KINDS)}")
+    if not title or len(title) > 200:
+        raise Usage("title 必须是 1–200 字")
+    if not body or len(body) > 20_000:
+        raise Usage("正文（stdin）必须是 1–20000 字")
+    if args.kind in CARD_KINDS and not SLUG_RE.match(args.slug or ""):
+        raise Usage(f"{args.kind} 提案需要 --slug（小写字母/数字/连字符）指明卡片")
+    if args.kind == "persona" and not (args.find or "").strip():
+        raise Usage("persona 提案需要 --find 指明被替换的原文")
+    if args.summary is not None and (not args.summary.strip() or len(args.summary) > 200):
+        raise Usage("--summary 必须是 1–200 字")
+    proposal = {"id": f"p-{time.strftime('%Y%m%d')}{secrets.token_hex(3)}", "kind": args.kind,
+                "title": title, "body": body, "evidence": [e[:500] for e in args.evidence],
+                "status": "pending", "createdAt": utc_now()}
+    if args.find:
+        proposal["find"] = args.find
+    if args.slug:
+        proposal["slug"] = args.slug
+    if args.summary:
+        proposal["summary"] = args.summary.strip()
+    ensure_dirs()
+    with file_lock(PROPOSALS_LOCK):
+        append_jsonl(PROPOSALS_FILE, [{"event": "create", **proposal}])
+    emit(proposal, args.json, proposal["id"])
+    return 0
+
+
+def cmd_list(args) -> int:
+    items = [p for p in load().values() if not args.status or p.get("status") == args.status]
+    emit(items, args.json, "\n".join(f"{p['id']}\t{p['status']}\t{p['kind']}\t{p['title']}" for p in items))
+    return 0
+
+
+def _pending(proposal_id: str) -> dict:
+    proposal = load().get(proposal_id)
+    if not proposal:
+        raise Failure(f"提案不存在: {proposal_id}")
+    if proposal.get("status") != "pending":
+        raise Failure(f"提案 {proposal_id} 已是 {proposal.get('status')}，不能重复处理")
+    return proposal
+
+
+_atomic = atomic_write
+
+
+def _replace_once(path: Path, find: str, body: str):
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise Failure(f"{path.parent.name}/{path.name} 不存在，提案可能已过时") from None
+    count = text.count(find)
+    if count != 1:
+        raise Failure(f"find 原文在 {path.name} 中出现 {count} 次（须恰好 1 次），提案可能已过时")
+    return path, text.replace(find, body, 1)
+
+
+def _plan(proposal: dict, now: str):
+    """返回 (path, new_text) 或 None；只计算，不写。"""
+    kind = proposal["kind"]
+    body = proposal["body"].rstrip("\n")
+    if kind == "iron":
+        raise Failure("iron 提案已停用：铁律卡已拆成 rules/ 下的规则卡，请按新卡重新提案")
+    if kind in CARD_KINDS:
+        path = CARD_KINDS[kind] / f"{proposal['slug']}.md"
+        if proposal.get("find"):
+            return _replace_once(path, proposal["find"], body)
+        if path.exists():
+            raise Failure(f"{path.parent.name}/{path.name} 已存在，拒绝覆盖（修改请带 --find）")
+        return path, render_card(proposal["title"], body, proposal.get("summary", ""), proposal["id"], now)
+    if kind == "persona":
+        path = PROFILE_FILE
+        text = path.read_text(encoding="utf-8")
+        count = text.count(proposal["find"])
+        if count != 1:
+            raise Failure(f"find 原文在 {path.name} 中出现 {count} 次（须恰好 1 次），提案可能已过时")
+        return path, text.replace(proposal["find"], body, 1)
+    return None
+
+
+def cmd_apply(args) -> int:
+    if not args.confirmed:
+        raise Usage("apply 会写入个人数据，必须带 --confirmed")
+    ensure_dirs()
+    with file_lock(PROPOSALS_LOCK):
+        proposal = _pending(args.id)
+        if proposal.get("kind") in ("rule", "knowledge", "persona"):
+            assert_legacy_write_allowed(BUTLER_ROOT)
+        now = utc_now()
+        planned = _plan(proposal, now)
+        journal = []
+        if proposal["kind"] == "fact":
+            journal.append({"ts": now, "source": "butler", "type": "fact", "tags": ["proposal"],
+                            "text": proposal["body"][:2000], "ref": f"proposal://{proposal['id']}"})
+        journal.append({"ts": now, "source": "butler", "type": "decision", "tags": ["proposal", proposal["kind"]],
+                        "text": f"批准提案 {proposal['id']}：{proposal['title']}"[:2000],
+                        "ref": f"proposal://{proposal['id']}"})
+        previous = None
+        if planned:
+            path, text = planned
+            previous = path.read_text(encoding="utf-8") if path.exists() else None
+            _atomic(path, text)
+        try:
+            with file_lock(JOURNAL_LOCK):
+                append_jsonl(JOURNAL_FILE, journal)
+            append_jsonl(PROPOSALS_FILE, [{"event": "status", "id": proposal["id"], "status": "applied", "decidedAt": now}])
+        except OSError:
+            if planned:
+                path, _ = planned
+                if previous is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    _atomic(path, previous)
+            raise
+    proposal.update(status="applied", decidedAt=now)
+    if planned:
+        # 决定已落盘；上下文编译失败只告警，下次 build-context 可补。
+        try:
+            compile_context()
+        except (OSError, ValueError) as error:
+            print(f"proposals: 已批准，但 context.md 编译失败：{error}", file=sys.stderr)
+    emit(proposal, args.json, f"{proposal['id']} applied")
+    return 0
+
+
+def cmd_reject(args) -> int:
+    reason = (args.reason or "").strip()[:500]
+    ensure_dirs()
+    with file_lock(PROPOSALS_LOCK):
+        proposal = _pending(args.id)
+        now = utc_now()
+        event = {"event": "status", "id": proposal["id"], "status": "rejected", "decidedAt": now}
+        if reason:
+            event["reason"] = reason
+        append_jsonl(PROPOSALS_FILE, [event])
+    proposal.update(status="rejected", decidedAt=now)
+    if reason:
+        proposal["reason"] = reason
+    emit(proposal, args.json, f"{proposal['id']} rejected")
+    return 0
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(prog="proposals", description=__doc__.splitlines()[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    add = sub.add_parser("add")
+    add.add_argument("--kind", required=True)
+    add.add_argument("--title", required=True)
+    add.add_argument("--find")
+    add.add_argument("--slug")
+    add.add_argument("--summary")
+    add.add_argument("--evidence", action="append", default=[])
+    lst = sub.add_parser("list")
+    lst.add_argument("--status", choices=["pending", "applied", "rejected"])
+    app = sub.add_parser("apply")
+    app.add_argument("id")
+    app.add_argument("--confirmed", action="store_true")
+    rej = sub.add_parser("reject")
+    rej.add_argument("id")
+    rej.add_argument("--reason")
+    for parser in (add, lst, app, rej):
+        parser.add_argument("--json", action="store_true")
+    try:
+        args = ap.parse_args(argv)
+    except SystemExit as exc:
+        return 2 if exc.code else 0
+    handlers = {"add": cmd_add, "list": cmd_list, "apply": cmd_apply, "reject": cmd_reject}
+    try:
+        return handlers[args.cmd](args)
+    except Usage as exc:
+        print(f"proposals: {exc}", file=sys.stderr)
+        return 2
+    except (Failure, LegacyWriteBlocked, OSError, UnicodeDecodeError) as exc:
+        print(f"proposals: {exc}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,126 @@
+#!/usr/bin/env python
+"""card — 读取 legacy 卡片，或在 Wiki cutover 后只读取正式卡片投影。"""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _lib import BUTLER_ROOT, CONTEXT_FILE, PROFILE_FILE, card_path, compile_context, list_cards
+from _pipeline_cards import CardError, Cards
+from _pipeline_store import Store
+
+USAGE = "用法: card [all|profile|rule/<slug>|knowledge/<slug>] | card --list [--json]"
+
+
+def store_mode() -> str:
+    marker = Cards(BUTLER_ROOT)._safe('etc/knowledge-store.json')
+    if not marker.exists():
+        return "legacy"
+    try:
+        data = json.loads(marker.read_text(encoding="utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
+        raise CardError("store_not_active", "knowledge store marker is invalid") from exc
+    if (not isinstance(data, dict) or type(data.get("version")) is not int
+            or data.get("version") != 1 or data.get("active") not in ("legacy", "wiki")):
+        raise CardError("store_not_active", "knowledge store marker is invalid")
+    return data["active"]
+
+
+def legacy_id(kind: str, source: str) -> str:
+    return "legacy-" + hashlib.sha256(f"{kind}:{source}".encode()).hexdigest()[:24]
+
+
+def wiki_items(cards: Cards, kind: str | None = None) -> list[dict]:
+    return cards.handle("cards.search", {"query": "", **({"kind": kind} if kind else {})})["items"]
+
+
+def wiki_read(cards: Cards, ident: str) -> dict:
+    if '/' not in ident:
+        return cards.handle("cards.read", {"id": ident})
+    # Compatibility lookup for pre-cutover IDs and migrated metadata.
+    kind, sep, slug = ident.partition("/")
+    if sep and kind in ("rule", "knowledge"):
+        source = ('rules' if kind == 'rule' else 'knowledge') + '/' + slug + '.md'
+        mapped = legacy_id(kind, source)
+        for item in wiki_items(cards, kind):
+            if item.get("id") == mapped or item.get("legacySource") == source or item.get("source") == source:
+                return cards.handle("cards.read", {"id": item["id"]})
+    raise CardError("not_found", "card not found")
+
+
+def wiki_index(items: list[dict]) -> list[dict]:
+    return [{k: item[k] for k in ("id", "title", "summary") if k in item} for item in items]
+
+
+def wiki_all(cards: Cards) -> str:
+    items = wiki_items(cards)
+    profiles = [item for item in items if item.get("kind") == "profile"]
+    lines = ["# Butler context", "", "# 正式卡片索引"]
+    current = None
+    for item in items:
+        kind = item.get("kind")
+        if kind != current:
+            lines.extend(["", f"## {kind}"])
+            current = kind
+        summary = f" — {item['summary']}" if item.get("summary") else ""
+        lines.append(f"- `{item['id']}` {item.get('title', item['id'])}{summary}")
+    if not items:
+        lines.extend(["", "（暂无 active 正式卡片）"])
+    for item in profiles:
+        lines.extend(["", f"# 画像：{item.get('title', item['id'])}", item.get("body", "").rstrip()])
+    return "\n".join(lines) + "\n"
+
+
+def main(argv: list[str]) -> int:
+    args = argv[1:]
+    as_json = "--json" in args
+    args = [a for a in args if a != "--json"]
+    try:
+        mode = store_mode()
+        if mode == "legacy":
+            if args == ["--list"]:
+                cards = list_cards()
+                print(json.dumps(cards, ensure_ascii=False, indent=2) if as_json else "\n".join(f"{c['id']}\t{c['title']}\t{c['summary']}" for c in cards))
+                return 0
+            if len(args) > 1:
+                print(USAGE, file=sys.stderr); return 2
+            what = args[0] if args else "all"
+            if what == "all":
+                if not CONTEXT_FILE.exists(): compile_context()
+                print(CONTEXT_FILE.read_text(encoding="utf-8"), end=""); return 0
+            path = PROFILE_FILE if what == "profile" else card_path(what)
+            if path is None:
+                print(USAGE, file=sys.stderr); return 2
+            if not path.exists():
+                print(f"card: 不存在 {what}", file=sys.stderr); return 1
+            print(path.read_text(encoding="utf-8"), end=""); return 0
+
+        if len(args) > 1 or (args and args[0] not in ("--list", "all", "profile") and card_path(args[0]) is None and not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}', args[0])):
+            print(USAGE, file=sys.stderr); return 2
+        with Store(BUTLER_ROOT).lock():
+            cards = Cards(BUTLER_ROOT)
+            cards.recover()
+            if args == ["--list"]:
+                items = wiki_items(cards)
+                print(json.dumps(wiki_index(items), ensure_ascii=False, indent=2) if as_json else "\n".join(f"{c['id']}\t{c.get('title','')}\t{c.get('summary','')}" for c in items))
+                return 0
+            what = args[0] if args else "all"
+            if what == "all":
+                print(wiki_all(cards), end=""); return 0
+            if what == "profile":
+                profiles = wiki_items(cards, "profile")
+                if not profiles:
+                    print("card: 不存在 profile", file=sys.stderr); return 1
+                print("\n\n".join(item.get("body", "").rstrip() for item in profiles) + "\n", end=""); return 0
+            item = wiki_read(cards, what)
+            print(item.get("body", ""), end=""); return 0
+    except (CardError, OSError, ValueError, FileNotFoundError) as error:
+        print(f"card: {error}", file=sys.stderr); return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

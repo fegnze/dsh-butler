@@ -1,0 +1,636 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>操作台 · 设计预览 v2（建议 vs 现状）</title>
+<style>
+  :root {
+    --pv-font: -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", Arial, sans-serif;
+    --pv-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: var(--pv-font);
+    background: #eceff3;
+    color: #1a1e24;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── harness toolbar (not part of the design under review) ─────────── */
+  .pv-bar {
+    position: sticky; top: 0; z-index: 50;
+    display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+    padding: 11px 20px;
+    background: #fff;
+    border-bottom: 1px solid #d9dee6;
+    box-shadow: 0 1px 3px rgba(19,45,83,.06);
+  }
+  .pv-bar__h { font-size: 13.5px; font-weight: 700; letter-spacing: -.01em; }
+  .pv-bar__h small { font-weight: 400; color: #6b7583; margin-left: 6px; }
+  .pv-group { display: flex; align-items: center; gap: 7px; }
+  .pv-group > label { font-size: 11px; font-weight: 600; color: #6b7583; }
+  .pv-seg { display: inline-flex; border: 1px solid #ccd4de; border-radius: 8px; overflow: hidden; }
+  .pv-seg button {
+    font: 500 12px/1 var(--pv-font); padding: 7px 12px; border: 0; background: #fff;
+    color: #4b5563; cursor: pointer; border-right: 1px solid #e2e7ee;
+  }
+  .pv-seg button:last-child { border-right: 0; }
+  .pv-seg button[aria-pressed="true"] { background: #1a1e24; color: #fff; }
+  .pv-spacer { flex: 1 1 auto; }
+  .pv-note-inline { font-size: 11.5px; color: #838d9b; }
+
+  /* ── stage ─────────────────────────────────────────────────────────── */
+  .pv-layout { display: flex; align-items: flex-start; gap: 20px; padding: 20px; }
+  .pv-stage { flex: 1 1 auto; min-width: 0; }
+  .pv-frame {
+    position: relative; overflow: hidden;
+    border-radius: 14px;
+    border: 1px solid #d3d9e2;
+    box-shadow: 0 12px 34px -14px rgba(19,45,83,.3);
+    min-height: 420px;
+  }
+  .pv-stage[data-bg="skin"] .pv-frame {
+    background:
+      radial-gradient(115% 95% at 0% 0%, rgba(24,186,178,.96), rgba(24,186,178,0) 56%),
+      radial-gradient(95% 85% at 9% 104%, rgba(64,203,197,.88), rgba(64,203,197,0) 62%),
+      linear-gradient(178deg, #e8f6f5, #fbfdfd 78%);
+  }
+  .pv-stage[data-bg="plain"] .pv-frame { background: #f6f7f9; }
+  .pv-stage[data-bg="skin"][data-noise="on"] .pv-frame::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background-image: radial-gradient(rgba(255,255,255,.6) 1px, transparent 1px);
+    background-size: 11px 11px;
+    opacity: .5;
+  }
+
+  /* ── the console under review ──────────────────────────────────────── */
+  .bp-console {
+    --gutter: 28px;
+    position: relative; z-index: 1;
+    padding: 0 var(--gutter) 40px;
+    font-family: var(--pv-font);
+    font-size: 13px;
+    color: var(--ink-1);
+  }
+  .pv-stage {
+    --tile: rgba(255,255,255,.80);
+    --tile-solid: rgba(255,255,255,.86);
+    --band: rgba(248,251,252,.72);
+    /* Glass belongs to the card surface. Inner controls and rules stay solid
+       so text, borders, and action targets do not dissolve into the wallpaper. */
+    --line: #c7d1da;
+    --line-strong: #8796a5;
+    --ink-1: #171b21;
+    --ink-2: #4b5563;
+    --ink-3: #67717f;
+    --ink-4: #7f8998;
+    --wash: rgba(19,45,83,.05);
+    --ok: #0f9d58;
+    --warn: #b06000;
+    --bad: #d13438;
+    --shadow: 0 1px 2px rgba(19,45,83,.05), 0 10px 22px -10px rgba(19,45,83,.16);
+    --shadow-hover: 0 2px 4px rgba(19,45,83,.07), 0 16px 30px -12px rgba(19,45,83,.24);
+    --frost: blur(20px) saturate(.42);
+  }
+  .pv-stage[data-theme="dark"] {
+    --tile: rgba(40,45,56,.74);
+    --tile-solid: rgba(44,49,60,.84);
+    --band: rgba(24,27,34,.74);
+    --line: #647080;
+    --line-strong: #9eafc3;
+    --ink-1: #eef2f7;
+    --ink-2: #b3becb;
+    --ink-3: #939fac;
+    --ink-4: #7c8794;
+    --wash: rgba(163,190,222,.09);
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 26px -12px rgba(0,0,0,.6);
+    --shadow-hover: 0 2px 6px rgba(0,0,0,.5), 0 18px 34px -14px rgba(0,0,0,.7);
+  }
+
+  /* ---- head ---------------------------------------------------------- */
+  .bp-head {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    padding: 26px 0 18px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 28px;
+    background: rgba(255,255,255,.42);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(19,45,83,.26);
+    border-radius: 20px;
+    box-shadow: rgba(255,255,255,.5) 0 1px 0 inset, rgba(19,45,83,.16) 0 10px 34px;
+  }
+  .pv-stage[data-theme="dark"] .bp-head {
+    background: rgba(0,0,0,.40);
+    border-color: rgba(148,180,220,.32);
+    box-shadow: rgba(255,255,255,.07) 0 1px 0 inset, rgba(2,6,14,.32) 0 8px 30px;
+  }
+  /* The title keeps the host's glass treatment. Lower groups deliberately
+    step in by 16px on both sides, creating a clear title-to-content hierarchy. */
+  .bp-console > .bp-sec { margin-left: 16px; margin-right: 16px; }
+  .bp-console > .bp-head + .bp-sec { margin-top: 0; }
+  .bp-console > .bp-head + .bp-sec .bp-sec__head { padding-top: 0; }
+  .bp-console > .bp-head + .bp-sec { padding-top: 0; }
+  .bp-head__title { margin: 0; font-size: 16px; line-height: 24px; font-weight: 700; letter-spacing: -.015em; }
+  .bp-head__sub { font-size: 12px; line-height: 18px; color: var(--ink-3); }
+  .bp-head__spacer { flex: 1 1 auto; }
+  .bp-head__hint { font-size: 11px; color: var(--ink-4); }
+
+  /* ---- controls ------------------------------------------------------ */
+  .bp-search {
+    display: flex; align-items: center; gap: 7px;
+    height: 30px; padding: 0 10px; min-width: 190px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--tile-solid);
+  }
+  .bp-search svg { width: 13px; height: 13px; flex: none; color: var(--ink-4); }
+  .bp-search input {
+    flex: 1 1 auto; min-width: 0; border: 0; outline: 0; background: transparent;
+    color: var(--ink-1); font: 12px/1 var(--pv-font);
+  }
+  .bp-search input::placeholder { color: var(--ink-4); }
+  .bp-btn {
+    height: 30px; padding: 0 12px;
+    border: 1px solid var(--line); border-radius: 8px;
+    background: var(--tile-solid); color: var(--ink-2);
+    font: 600 12px/1 var(--pv-font); cursor: pointer;
+    transition: background-color .12s ease, border-color .12s ease, color .12s ease;
+  }
+  .bp-btn:hover { border-color: var(--line-strong); color: var(--ink-1); }
+  .bp-btn--ghost { background: transparent; border-color: transparent; padding: 0 8px; color: var(--ink-3); }
+  .bp-btn--ghost:hover { background: var(--wash); }
+
+  /* ---- section ------------------------------------------------------- */
+  .bp-sec { margin-bottom: 30px; }
+  .bp-sec__head {
+    display: flex; align-items: baseline; gap: 9px;
+    padding: 0 0 11px;
+  }
+  .bp-sec__title { margin: 0; font-size: 13px; line-height: 18px; font-weight: 700; }
+  .bp-sec__count {
+    min-width: 20px; padding: 0 6px; border-radius: 999px;
+    background: var(--wash); color: var(--ink-3);
+    font: 600 11px/17px var(--pv-font); text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+  .bp-sec__spacer { flex: 1 1 auto; }
+  .bp-sec__hint { font-size: 11px; color: var(--ink-4); opacity: 0; transition: opacity .15s ease; }
+  .bp-sec:hover .bp-sec__hint { opacity: 1; }
+
+  /* ---- grid ---------------------------------------------------------- */
+  .bp-grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+
+  /* ---- a card -------------------------------------------------------- */
+  .bp-tile {
+    position: relative;
+    display: flex; flex-direction: column; min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: var(--tile);
+    backdrop-filter: var(--frost);
+    -webkit-backdrop-filter: var(--frost);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+    transition: border-color .14s ease, box-shadow .14s ease;
+  }
+  /* Keep the glass outer shell, but make the content controls opaque enough
+     to remain legible over blue-fantasy's aqua spotlight and dot texture. */
+  .bp-tile__head,
+  .bp-tile__foot,
+  .bp-tile__mark,
+  .bp-chip,
+  .bp-btn,
+  .bp-search,
+  .bp-run__mark {
+    isolation: isolate;
+  }
+  .bp-tile__foot { background: rgba(248,251,252,.94); }
+  .bp-btn { background: #fff; }
+  .bp-search { background: #fff; }
+  .bp-chip { background: #eef2f5; }
+  .bp-tile:hover { border-color: var(--line-strong); box-shadow: var(--shadow-hover); }
+  /* only an exception earns a coloured edge — colour then means "look here" */
+  .bp-tile__rail { position: absolute; inset: 0 auto 0 0; width: 3px; display: none; }
+  .bp-tile[data-tone="warn"] .bp-tile__rail { display: block; background: var(--warn); }
+  .bp-tile[data-tone="bad"]  .bp-tile__rail { display: block; background: var(--bad); }
+
+  .bp-tile__head { display: flex; align-items: flex-start; gap: 11px; padding: 13px 14px 12px; }
+  .bp-tile__mark {
+    flex: none; width: 28px; height: 28px; border-radius: 8px;
+    display: grid; place-items: center;
+    font-family: var(--pv-font); font-size: 11px; font-weight: 700; line-height: 1;
+    letter-spacing: .01em; user-select: none;
+  }
+  /* two CJK initials need a step down or they overflow the 28px tile */
+  .bp-tile__mark[data-cjk="true"], .bp-run__mark[data-cjk="true"] { font-size: 9.5px; letter-spacing: 0; }
+  .bp-tile__text { min-width: 0; flex: 1 1 auto; }
+  .bp-tile__name {
+    margin: 0; font-size: 14px; line-height: 20px; font-weight: 600;
+    letter-spacing: -.01em; color: var(--ink-1); overflow-wrap: anywhere;
+  }
+  .bp-tile__desc {
+    margin: 3px 0 0;
+    font-size: 12.5px; line-height: 17px; color: var(--ink-2);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+    overflow: hidden; overflow-wrap: anywhere;
+    min-height: 34px;
+  }
+  .bp-grip {
+    flex: none; width: 20px; height: 20px; padding: 0; border: 0; border-radius: 6px;
+    background: transparent; color: var(--ink-4); cursor: grab;
+    display: grid; place-items: center;
+    opacity: 0; transition: opacity .12s ease, background-color .12s ease;
+  }
+  .bp-tile:hover .bp-grip { opacity: .75; }
+  .bp-grip:hover { opacity: 1 !important; background: var(--wash); color: var(--ink-2); }
+
+  .bp-tile__foot {
+    margin-top: auto;
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 9px 14px 10px;
+    border-top: 1px solid var(--line);
+    background: rgba(248,251,252,.94);
+  }
+  .pv-stage[data-theme="dark"] .bp-tile__foot { background: #252b35; }
+  .pv-stage[data-theme="dark"] .bp-btn { background: #313846; }
+  .pv-stage[data-theme="dark"] .bp-search { background: #313846; }
+  .pv-stage[data-theme="dark"] .bp-chip { background: #343d4b; }
+  .bp-chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    max-width: 100%; height: 20px; padding: 0 8px;
+    border: 1px solid var(--line); border-radius: 6px;
+    background: var(--wash); color: var(--ink-2);
+    font-size: 11px; font-weight: 600; white-space: nowrap;
+  }
+  .bp-dot { flex: none; width: 7px; height: 7px; border-radius: 999px; background: var(--ink-4); }
+  .bp-dot[data-tone="ok"] { background: var(--ok); }
+  .bp-dot[data-tone="warn"] { background: var(--warn); }
+  .bp-dot[data-tone="bad"] { background: var(--bad); }
+  .bp-slot {
+    font-family: var(--pv-mono); font-size: 11px; color: var(--ink-4);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+  }
+  .bp-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .bp-acts .bp-btn { height: 25px; padding: 0 10px; font-size: 11px; }
+
+  /* ---- carrier rows (守护进程) --------------------------------------- */
+  .bp-runs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+  .bp-run {
+    display: flex; align-items: center; gap: 12px; min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--line); border-radius: 12px;
+    background: var(--tile);
+    backdrop-filter: var(--frost); -webkit-backdrop-filter: var(--frost);
+    box-shadow: var(--shadow);
+  }
+  .bp-run__mark {
+    flex: none; width: 28px; height: 28px; border-radius: 8px;
+    display: grid; place-items: center;
+    font-size: 11px; font-weight: 700;
+  }
+  .bp-run__text { min-width: 0; flex: 1 1 auto; }
+  .bp-run__name { font-size: 13.5px; line-height: 19px; font-weight: 600; color: var(--ink-1); }
+  .bp-run__meta {
+    font-family: var(--pv-mono); font-size: 11.5px; line-height: 17px; color: var(--ink-3);
+    font-variant-numeric: tabular-nums; overflow-wrap: anywhere;
+  }
+
+  /* ── the identity palette (hue → tint + glyph) ─────────────────────── */
+  .mk[data-hue="0"] { background: rgba(59,91,219,.15);  color: #2f4bc4; }
+  .mk[data-hue="1"] { background: rgba(11,114,133,.15); color: #0b7285; }
+  .mk[data-hue="2"] { background: rgba(154,100,0,.16);  color: #8a5a00; }
+  .mk[data-hue="3"] { background: rgba(112,72,232,.15); color: #6238d8; }
+  .mk[data-hue="4"] { background: rgba(194,37,92,.14);  color: #b21f53; }
+  .mk[data-hue="5"] { background: rgba(43,138,62,.15);  color: #237434; }
+  .mk[data-hue="6"] { background: rgba(24,100,171,.15); color: #1864ab; }
+  .mk[data-hue="7"] { background: rgba(217,72,15,.15);  color: #c4400c; }
+  .pv-stage[data-theme="dark"] .mk[data-hue="0"] { background: rgba(145,167,255,.18); color: #a9bbff; }
+  .pv-stage[data-theme="dark"] .mk[data-hue="1"] { background: rgba(102,217,232,.18); color: #83e2ee; }
+  .pv-stage[data-theme="dark"] .mk[data-hue="2"] { background: rgba(255,212,59,.18);  color: #ffd94f; }
+  .pv-stage[data-theme="dark"] .mk[data-hue="3"] { background: rgba(177,151,252,.18); color: #c0aaff; }
+  .pv-stage[data-theme="dark"] .mk[data-hue="4"] { background: rgba(247,131,172,.18); color: #fb9dba; }
+  .pv-stage[data-theme="dark"] .mk[data-hue="5"] { background: rgba(140,233,154,.18); color: #a1eeae; }
+  .pv-stage[data-theme="dark"] .mk[data-hue="6"] { background: rgba(116,192,252,.18); color: #93cdff; }
+  .pv-stage[data-theme="dark"] .mk[data-hue="7"] { background: rgba(255,169,77,.18);  color: #ffbe7a; }
+
+  /* ── alignment guides ─────────────────────────────────────────────── */
+  [data-guides="on"] .bp-head,
+  [data-guides="on"] .bp-sec,
+  [data-guides="on"] .bp-grid,
+  [data-guides="on"] .bp-runs,
+  [data-guides="on"] .bp-tile,
+  [data-guides="on"] .bp-run,
+  [data-guides="on"] .bp-sec__head { outline: 1px solid rgba(232,53,120,.65); outline-offset: -1px; }
+  [data-guides="on"] .bp-tile__head,
+  [data-guides="on"] .bp-tile__foot { outline: 1px solid rgba(53,132,232,.5); outline-offset: -1px; }
+
+  /* ── the CURRENT build, reproduced from the live page ─────────────── */
+  [data-variant="now"] .bp-head {
+    border-radius: 20px;
+    margin: 12px 16px 0;
+    padding: 10px 16px 8px;
+    background: rgba(255,255,255,.42);
+    backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+    border: 1px solid rgba(19,45,83,.26);
+    border-bottom-color: transparent;
+    box-shadow: rgba(255,255,255,.5) 0 1px 0 inset, rgba(19,45,83,.16) 0 10px 34px;
+  }
+  [data-variant="now"] .bp-head { border-bottom: 0; }
+  [data-variant="now"] .bp-tile,
+  [data-variant="now"] .bp-run,
+  [data-variant="now"] .bp-tile__head,
+  [data-variant="now"] .bp-tile__foot,
+  [data-variant="now"] .bp-tile__mark,
+  [data-variant="now"] .bp-run__mark { border-radius: 14px; }
+  [data-variant="now"] .bp-tile,
+  [data-variant="now"] .bp-run {
+    background: linear-gradient(180deg, rgba(255,255,255,.90), rgba(255,255,255,.56));
+    border-color: rgba(19,45,83,.16);
+    backdrop-filter: none; -webkit-backdrop-filter: none;
+    box-shadow: 0 1px 2px rgba(15,17,21,.06);
+  }
+  [data-variant="now"] .bp-tile__rail { display: block; background: var(--ink-4); }
+  [data-variant="now"] .bp-tile[data-tone="ok"] .bp-tile__rail { background: var(--ok); }
+  [data-variant="now"] .bp-tile__name { font-size: 13.5px; font-weight: 600; color: #41525c; }
+  [data-variant="now"] .bp-tile__desc { font-size: 12px; line-height: 16.5px; color: #6cceca; min-height: 33px; }
+  [data-variant="now"] .bp-tile__foot { background: rgba(255,255,255,.72); }
+  [data-variant="now"] .bp-sec__hint { opacity: 1; }
+
+  /* ── the notes panel ──────────────────────────────────────────────── */
+  .pv-notes {
+    flex: none; width: 336px;
+    background: #fff; border: 1px solid #d9dee6; border-radius: 14px;
+    padding: 16px 17px 20px;
+    box-shadow: 0 10px 30px -18px rgba(19,45,83,.35);
+  }
+  .pv-notes h2 {
+    margin: 0 0 4px; font-size: 13px; font-weight: 700; letter-spacing: -.01em;
+  }
+  .pv-notes h3 {
+    margin: 18px 0 8px; font-size: 11px; font-weight: 700;
+    letter-spacing: .06em; text-transform: uppercase; color: #838d9b;
+  }
+  .pv-notes h3:first-of-type { margin-top: 14px; }
+  .pv-notes p { margin: 0 0 9px; font-size: 12px; line-height: 18px; color: #3f4854; }
+  .pv-notes ul { margin: 0; padding-left: 16px; }
+  .pv-notes li { font-size: 12px; line-height: 18px; color: #3f4854; margin-bottom: 7px; }
+  .pv-notes code {
+    font-family: var(--pv-mono); font-size: 11px;
+    background: #f1f4f8; border: 1px solid #e2e7ee; border-radius: 4px;
+    padding: .5px 4px; color: #b21f53;
+    overflow-wrap: anywhere; word-break: break-word;
+  }
+  .pv-notes b { font-weight: 700; }
+  .pv-metric {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+    padding: 6px 0; border-bottom: 1px dashed #e2e7ee;
+    font-size: 11.5px; color: #4b5563;
+  }
+  .pv-metric:last-child { border-bottom: 0; }
+  .pv-metric b { font-family: var(--pv-mono); font-size: 11.5px; }
+  .pv-metric .bad { color: #c0392b; font-weight: 700; }
+  .pv-metric .good { color: #0f7a44; font-weight: 700; }
+  .pv-tag {
+    display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .04em;
+    padding: 2px 6px; border-radius: 5px; margin-right: 6px; vertical-align: 1px;
+  }
+  .pv-tag--root { background: #fde8e8; color: #b21f53; }
+  .pv-tag--fix  { background: #e6f5ec; color: #0f7a44; }
+
+  @media (max-width: 1180px) { .pv-layout { flex-direction: column; } .pv-notes { width: 100%; } }
+</style>
+</head>
+<body>
+
+<div class="pv-bar">
+  <div class="pv-bar__h">操作台 · 设计预览 <small>v2 · 待你确认后我再改插件</small></div>
+  <div class="pv-group">
+    <label>方案</label>
+    <div class="pv-seg" id="seg-variant">
+      <button data-v="now" aria-pressed="false">现状（已装 0.6.0）</button>
+      <button data-v="new" aria-pressed="true">建议</button>
+    </div>
+  </div>
+  <div class="pv-group">
+    <label>主题</label>
+    <div class="pv-seg" id="seg-theme">
+      <button data-t="light" aria-pressed="true">浅色</button>
+      <button data-t="dark" aria-pressed="false">深色</button>
+    </div>
+  </div>
+  <div class="pv-group">
+    <label>背景</label>
+    <div class="pv-seg" id="seg-bg">
+      <button data-b="skin" aria-pressed="true">皮肤（blue-fantasy）</button>
+      <button data-b="plain" aria-pressed="false">纯色</button>
+    </div>
+  </div>
+  <div class="pv-group">
+    <label>对齐参考线</label>
+    <div class="pv-seg" id="seg-guides">
+      <button data-g="off" aria-pressed="true">关</button>
+      <button data-g="on" aria-pressed="false">开</button>
+    </div>
+  </div>
+  <div class="pv-spacer"></div>
+  <div class="pv-note-inline" id="pv-readout"></div>
+</div>
+
+<div class="pv-layout">
+  <div class="pv-stage" id="stage" data-theme="light" data-bg="skin" data-variant="new" data-noise="on" data-guides="off">
+    <div class="pv-frame">
+      <div class="bp-console" id="console"></div>
+    </div>
+  </div>
+
+  <aside class="pv-notes">
+    <h2>为什么现在"更模糊"</h2>
+    <p>不是审美问题，是三条可测的规则冲突。全部在真机页面上量到：</p>
+
+    <h3>根因 1 · CSS 撞车（标签名）</h3>
+    <p><span class="pv-tag pv-tag--root">ROOT</span>你的皮肤 <code>blue-fantasy</code> 自带这条全局规则：</p>
+    <p><code>[data-dsh-float] header { border-radius:20px; margin:12px 16px 0; padding:10px 16px 8px; backdrop-filter:blur(14px); box-shadow: …0 10px 34px }</code></p>
+    <p>而我的 <code>.bp-head</code> 正好是个 <code>&lt;header&gt;</code>。于是标题条被套上"浮动玻璃卡"，还被迫左右各缩进 <b>16px</b> —— 这就是<b>标题条和模块组挤在一起</b>、以及<b>左右对不齐</b>的直接原因（实测：标题条 x=327/w=899，区块 x=311/w=931）。</p>
+
+    <h3>根因 2 · CSS 撞车（类名子串）</h3>
+    <p><span class="pv-tag pv-tag--root">ROOT</span>皮肤还有 <code>[data-dsh-float] [class*="card"] { border-radius:14px }</code>。我的类名全含 <code>card</code> 子串，被整体命中 —— 卡片自己的 12px、身份块 8px 圆角全被强行改成 14px，形状发糊。</p>
+
+    <h3>根因 3 · 玻璃被皮肤染色</h3>
+    <p><span class="pv-tag pv-tag--root">ROOT</span>卡面是 <code>rgba(255,255,255,.9→.56)</code> 且<b>没有模糊</b>，皮肤的青绿直接透进来（实测卡面 <code>#cfeef0</code>），壁纸点阵还形成噪点。</p>
+
+    <h3>实测对比度（当前）</h3>
+    <div class="pv-metric"><span>卡片名称 <code>#628692</code> / 卡面</span><b class="bad">3.21 : 1</b></div>
+    <div class="pv-metric"><span>卡片描述 <code>#6cceca</code> / 卡面</span><b class="bad">1.51 : 1</b></div>
+    <div class="pv-metric"><span>WCAG AA 正文门槛</span><b>4.5 : 1</b></div>
+    <p style="margin-top:9px">描述文字 1.51:1 <b>基本等于看不见</b>——"找不到卡片"主要死在这里，不在配色。</p>
+
+    <h3>建议怎么改</h3>
+    <ul>
+      <li><span class="pv-tag pv-tag--fix">FIX</span>标题改用 <code>&lt;div&gt;</code>（避开 <code>header</code> 规则），并在样式表里做一次防御性重置。→ 左右 16px 错位消失。</li>
+      <li><span class="pv-tag pv-tag--fix">FIX</span>类名 <code>bp-card*</code> 改名 <code>bp-tile*</code>（避开 <code>class*="card"</code>）。→ 圆角恢复自己的值。</li>
+      <li><span class="pv-tag pv-tag--fix">FIX</span>卡面改"磨砂"：<code>rgba(255,255,255,.80)</code> + <code>blur(20px) saturate(.42)</code>。→ 保留透明感，但把青绿滤成柔灰白，噪点消失。</li>
+      <li><span class="pv-tag pv-tag--fix">FIX</span>字阶：名称 14/600 近黑；描述 12.5/300 中灰、固定两行高（同行卡片页脚对齐）。</li>
+      <li><span class="pv-tag pv-tag--fix">FIX</span>颜色只留一个含义：身份色块；状态改为 <b>仅异常</b>才上色边（正常不再染边），去掉满页绿边。</li>
+      <li><span class="pv-tag pv-tag--fix">FIX</span>单一口径对齐：<code>--gutter</code> 一个变量贯穿标题与所有区块。</li>
+      <li><span class="pv-tag pv-tag--fix">FIX</span>服务卡的"描述位"目前放的也是状态词，于是<b>同一句渲染两遍</b>（正文一次、胶囊一次）。建议正文让位给胶囊。</li>
+    </ul>
+
+    <h3>操作</h3>
+    <p>点顶部"对齐参考线 → 开"，标题、区块、卡片的左右边是否严格共线一眼可见。再切"现状/建议"对比。</p>
+  </aside>
+</div>
+
+<script>
+const DATA = {
+  sub: '已登记的工具、服务与工作流',
+  carry: [
+    { mark: 'BG', hue: 2, name: 'Butler Guardian',  meta: 'launchd · :37900',              tone: 'ok' },
+    { mark: 'DH', hue: 6, name: 'DeepSeek Harness', meta: 'launchd · :3080 · pid 46133',   tone: 'ok' },
+  ],
+  secs: [
+    { title: '服务', items: [
+      { mark:'NA', hue:5, name:'Next-AI-Draw-IO',       desc:'运行中', status:'运行中', tone:'ok',   slot:':6002', acts:['启动','停止','重启'] },
+      { mark:'TA', hue:4, name:'TencentDB-Agent-Memory',desc:'运行中', status:'运行中', tone:'ok',   slot:':8125', acts:['启动','停止','重启'] },
+      { mark:'WE', hue:4, name:'WeKnora',               desc:'端口占用',status:'端口占用',tone:'warn', slot:':8088', acts:['启动','停止','重启'] },
+      { mark:'WW', hue:0, name:'WTC-Web',               desc:'运行中', status:'运行中', tone:'ok',   slot:':5174', acts:['启动','停止','重启'] },
+    ]},
+    { title: '工具', items: [
+      { mark:'CS', hue:6, name:'ChatGPT Skin',             desc:'ChatGPT Desktop 主题管理、切换与导入', status:'运行中', tone:'ok', acts:['ChatGPT启动','重启','停止'] },
+      { mark:'CH', hue:0, name:'CherryStudio 可用模型名录', desc:'拉取 CherryStudio 可用模型，按厂商选择并同步到配置目标', status:'运行中', tone:'ok', acts:['重启','停止'] },
+      { mark:'FD', hue:0, name:'Feishu Document Gateway',  desc:'多身份飞书云文档网关（HTTP / MCP / 文档面板）', status:'运行中', tone:'ok', acts:['同步','重启','停止'] },
+      { mark:'GD', hue:1, name:'Google Drive Gateway',     desc:'全局 Google Drive 上传套件（CLI/MCP/面板）：按季度自动归档 + 规范命名 + OAuth 自动续期', status:'运行中', tone:'ok', acts:['上传','重启','停止'] },
+      { mark:'GG', hue:6, name:'Gmail Gateway',            desc:'Gmail 发送网关（CLI/MCP/面板）：列出所有邮件 spec、预览/发送（二次确认）、认证管理', status:'运行中', tone:'ok', acts:['重启','停止'] },
+      { mark:'发票', hue:2, name:'发票报销自动化',            desc:'批量录入报销单，依据最新报销单序号重命名发票与行程单附件', status:'运行中', tone:'ok', acts:['重启','停止'] },
+      { mark:'局域', hue:6, name:'局域网中转站',              desc:'零认证局域网文件 / 文本中转站，同网段任意设备浏览器直达收发', status:'运行中', tone:'ok', acts:['打开页面','重启','停止'] },
+      { mark:'WD', hue:4, name:'WTC-Docs Publisher',       desc:'WTC-Docs 提交与发布：链接校正 → 构建校验 → 提交推送 → 盯 GitHub Actions 部署', status:'运行中', tone:'ok', acts:['打开页面','发布','重启','停止'] },
+    ]},
+    { title: '工作流', items: [
+      { mark:'工作', hue:7, name:'工作区健康扫描', desc:'读取已登记工具与托管服务状态，结果进入观测台。', status:'就绪', tone:'ok', acts:['运行'] },
+    ]},
+  ],
+};
+
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+/* A service card's "description" slot currently holds its status word, so the
+   same word paints twice (once as text, once as the chip). Detect it and let
+   the chip own it. */
+const isCjk = (s) => /[^\x00-\x7F]/.test(s);
+const gripSvg = '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><g fill="currentColor"><circle cx="4" cy="2.5" r="1.15"/><circle cx="8" cy="2.5" r="1.15"/><circle cx="4" cy="6" r="1.15"/><circle cx="8" cy="6" r="1.15"/><circle cx="4" cy="9.5" r="1.15"/><circle cx="8" cy="9.5" r="1.15"/></g></svg>';
+const searchSvg = '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="4.4" stroke="currentColor" stroke-width="1.5"/><path d="M10.4 10.4 14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+
+function tile(item) {
+  const acts = (item.acts || []).map((a) => `<button class="bp-btn">${esc(a)}</button>`).join('');
+  /* The chip always carries the run state (that is what Card does upstream).
+     A service card's description slot currently holds that same state word, so
+     it would paint twice; the body line is shown only when it says something
+     the chip does not. */
+  const showBody = item.desc && item.desc !== item.status;
+  const body = showBody ? `<p class="bp-tile__desc">${esc(item.desc)}</p>` : '';
+  return `
+  <article class="bp-tile" data-tone="${esc(item.tone || 'idle')}">
+    <span class="bp-tile__rail"></span>
+    <div class="bp-tile__head">
+      <span class="bp-tile__mark mk" data-hue="${esc(item.hue)}"${isCjk(item.mark) ? ' data-cjk="true"' : ''}>${esc(item.mark)}</span>
+      <div class="bp-tile__text">
+        <h4 class="bp-tile__name">${esc(item.name)}</h4>
+        ${body}
+      </div>
+      <button class="bp-grip" title="拖动排序" aria-label="拖动排序">${gripSvg}</button>
+    </div>
+    <div class="bp-tile__foot">
+      <span class="bp-chip"><i class="bp-dot" data-tone="${esc(item.tone || 'idle')}"></i>${esc(item.status || item.desc)}</span>
+      ${item.slot ? `<span class="bp-slot">${esc(item.slot)}</span>` : ''}
+      <span class="bp-acts">${acts}</span>
+    </div>
+  </article>`;
+}
+
+function run(row) {
+  return `
+  <div class="bp-run">
+    <span class="bp-run__mark mk" data-hue="${esc(row.hue)}"${isCjk(row.mark) ? ' data-cjk="true"' : ''}>${esc(row.mark)}</span>
+    <div class="bp-run__text">
+      <div class="bp-run__name">${esc(row.name)}</div>
+      <div class="bp-run__meta">${esc(row.meta)}</div>
+    </div>
+    <span class="bp-chip"><i class="bp-dot" data-tone="${esc(row.tone)}"></i>运行中</span>
+    <button class="bp-btn">重启</button>
+  </div>`;
+}
+
+function section(sec, first) {
+  return `
+  <section class="bp-sec">
+    <div class="bp-sec__head">
+      <h3 class="bp-sec__title">${esc(sec.title)}</h3>
+      <span class="bp-sec__count">${sec.items.length}</span>
+      <span class="bp-sec__spacer"></span>
+      <span class="bp-sec__hint">拖动把手排序，或聚焦把手后按方向键</span>
+    </div>
+    <div class="bp-grid">${sec.items.map(tile).join('')}</div>
+  </section>`;
+}
+
+document.getElementById('console').innerHTML = `
+  <div class="bp-head">
+    <h1 class="bp-head__title">操作台</h1>
+    <span class="bp-head__sub">${esc(DATA.sub)}</span>
+    <span class="bp-head__spacer"></span>
+    <label class="bp-search">${searchSvg}<input placeholder="筛选名称或 id" aria-label="筛选名称或 id"></label>
+    <button class="bp-btn">刷新</button>
+  </div>
+
+  <section class="bp-sec">
+    <div class="bp-sec__head">
+      <h3 class="bp-sec__title">守护进程</h3>
+      <span class="bp-sec__count">${DATA.carry.length}</span>
+      <span class="bp-sec__spacer"></span>
+      <span class="bp-sec__hint">由 launchd 托管，不进这里的启停</span>
+    </div>
+    <div class="bp-runs">${DATA.carry.map(run).join('')}</div>
+  </section>
+
+  ${DATA.secs.map((s, i) => section(s, i === 0)).join('')}
+`;
+
+/* ---- harness wiring ------------------------------------------------- */
+const stage = document.getElementById('stage');
+const readout = document.getElementById('pv-readout');
+
+function wire(segId, apply) {
+  const seg = document.getElementById(segId);
+  seg.addEventListener('click', (e) => {
+    const btn = e.target.closest('button'); if (!btn) return;
+    [...seg.querySelectorAll('button')].forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
+    apply(btn.dataset);
+  });
+}
+wire('seg-variant', (d) => { stage.dataset.variant = d.v === 'new' ? 'new' : 'now'; measure(); });
+wire('seg-theme',   (d) => { stage.dataset.theme = d.t; measure(); });
+wire('seg-bg',      (d) => { stage.dataset.bg = d.b; measure(); });
+wire('seg-guides',  (d) => { stage.dataset.guides = d.g; });
+
+/* ---- live geometry readout: proves the alignment (or the lack of it) -- */
+function measure() {
+  const g = (sel) => document.querySelector('#console ' + sel);
+  const r = (el) => el ? el.getBoundingClientRect() : null;
+  const base = r(g('.bp-head'));
+  const sec = r(document.querySelectorAll('#console .bp-sec')[1]);
+  const tile = r(document.querySelectorAll('#console .bp-tile')[0]);
+  const cs = g('.bp-tile');
+  const head = cs ? getComputedStyle(cs) : null;
+  if (!base || !sec || !tile) { readout.textContent = ''; return; }
+  readout.textContent =
+    `标题 L/R ${base.left.toFixed(0)}/${base.right.toFixed(0)} · 区块 ${sec.left.toFixed(0)}/${sec.right.toFixed(0)} · ` +
+    `卡片 ${tile.left.toFixed(0)}/${tile.right.toFixed(0)} · 卡片圆角 ${head ? head.borderRadius : '-'}`;
+}
+window.addEventListener('load', measure);
+window.addEventListener('resize', measure);
+measure();
+</script>
+</body>
+</html>

@@ -1,0 +1,597 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://myspace.local/butler-framework/spec/butler.schema.json",
+  "title": "butler.json — Butler Framework 扩展物清单",
+  "description": "放在每个扩展物目录根下的清单。守护扫描到它即登记，删除即注销。kind 决定扩展物类型与可用字段；schemaVersion 固定为 1。",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "kind",
+    "id",
+    "name"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "kind": {
+      "type": "string",
+      "enum": [
+        "tool",
+        "service",
+        "faculty"
+      ],
+      "description": "tool：主人/AI 可操作的扩展工具，进操作台；service：仅托管的外部进程，进操作台；faculty：Butler 本体机能，进 Butler 视图。"
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "稳定标识，全局唯一。与目录名一致为佳。"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "展示名。"
+    },
+    "description": {
+      "type": "string"
+    },
+    "icon": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048,
+      "description": "tool / service 卡片图标，三种写法：① 图片文件（扩展名 png/jpg/jpeg/gif/webp/svg/ico；相对路径以清单目录为基准且不得越出该目录，绝对路径原样使用；单文件 ≤2MB）；② http(s):// 或 data:image/ 图片地址；③ emoji / 短文字（取前 8 个字符）。缺省、留空或图片读不出时，卡片显示由名称生成的字母。控制台文件选择器会把图片存为清单目录下的 icon-<hash>.png 并写入此字段。faculty 不进操作台，不得声明。"
+    },
+    "version": {
+      "type": "integer",
+      "minimum": 1,
+      "default": 1,
+      "description": "能力版本；接口或语义变化时递增。"
+    },
+    "frequency": {
+      "type": "string",
+      "enum": [
+        "low"
+      ],
+      "description": "low：折叠到低频区。"
+    },
+    "hosted": {
+      "$ref": "#/$defs/hosted"
+    },
+    "health": {
+      "$ref": "#/$defs/health"
+    },
+    "panelUrl": {
+      "type": "string",
+      "format": "uri",
+      "description": "tool 专用：二级弹板内嵌的页面。守护不代理它，panel 直接 iframe。"
+    },
+    "panelSize": {
+      "$ref": "#/$defs/panelSize",
+      "description": "tool 专用：二级面板的标准尺寸（像素）；panel 按视口大小自动缩小。"
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/action"
+      },
+      "description": "tool 专用：操作台行上的动作按钮。"
+    },
+    "reports": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/report"
+      },
+      "description": "faculty 专用：Butler 视图展示的报告项。"
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/command"
+      },
+      "description": "faculty 专用：可被 Host、自动化任务或 AI 调用的协议命令。"
+    },
+    "delegations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/delegation"
+      },
+      "description": "tool / service：可委托给新开 Butler Session 的判断步骤。由 SDK agentStep 经 Host /delegations 调用；会话只出方案，采纳与写入由调用方执行。"
+    },
+    "mcp": {
+      "$ref": "#/$defs/mcp",
+      "description": "tool / service：向 Butler 统一 MCP 服务注册的提供方。Butler 是 Framework 内唯一对外的 MCP 端点（Host 的 /myspace-butler/api/mcp）；扩展物只实现 stdio MCP，由 Host 按需拉起并以 <namespace>__<tool> 名称聚合对外，自身不得另行对外监听 MCP。"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "service"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "hosted"
+        ],
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "actions"
+              ]
+            },
+            {
+              "required": [
+                "reports"
+              ]
+            },
+            {
+              "required": [
+                "commands"
+              ]
+            },
+            {
+              "required": [
+                "panelUrl"
+              ]
+            },
+            {
+              "required": [
+                "panelSize"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "tool"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "reports"
+              ]
+            },
+            {
+              "required": [
+                "commands"
+              ]
+            },
+            {
+              "required": [
+                "flows"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "faculty"
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "actions"
+              ]
+            },
+            {
+              "required": [
+                "panelUrl"
+              ]
+            },
+            {
+              "required": [
+                "panelSize"
+              ]
+            },
+            {
+              "required": [
+                "icon"
+              ]
+            },
+            {
+              "required": [
+                "delegations"
+              ]
+            },
+            {
+              "required": [
+                "mcp"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "panelSize": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 320,
+          "maximum": 2400,
+          "description": "面板宽度（CSS px）。"
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 240,
+          "maximum": 1600,
+          "description": "面板高度（CSS px）。"
+        }
+      },
+      "minProperties": 1,
+      "description": "二级面板的推荐尺寸；缺省字段由 panel 使用默认值。"
+    },
+    "hosted": {
+      "type": "object",
+      "description": "守护托管块。有它则守护负责拉起/停止/重启/日志；无它则扩展物不是常驻进程。",
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "command": {
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "description": "shell 字符串，经 $SHELL -lic 执行（外部项目常用）。"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "argv 向量，直接 spawn；argv[0] 为 bun 时解析为绝对路径。"
+            }
+          ]
+        },
+        "cwd": {
+          "type": "string",
+          "description": "缺省为清单所在目录。"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "打开入口；缺省且有 port 时为 http://127.0.0.1:{port}。"
+        },
+        "openPath": {
+          "type": "string",
+          "description": "行上的打开按钮指向的本地路径。"
+        },
+        "group": {
+          "type": "string",
+          "description": "操作台分组名。"
+        },
+        "autoStart": {
+          "type": "boolean",
+          "default": false
+        },
+        "restart": {
+          "type": "string",
+          "enum": [
+            "never",
+            "on-failure",
+            "always"
+          ],
+          "default": "never",
+          "description": "退出后的重拉策略。tool 缺省 on-failure（带退避），service 缺省 never。"
+        }
+      }
+    },
+    "health": {
+      "type": "object",
+      "description": "健康探针。缺省：hosted.port 存在则做端口探活。",
+      "oneOf": [
+        {
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "string",
+              "format": "uri",
+              "description": "HTTP GET，2xx 为健康。"
+            }
+          }
+        },
+        {
+          "required": [
+            "exec"
+          ],
+          "properties": {
+            "exec": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "description": "退出码 0 为健康。"
+            }
+          }
+        }
+      ],
+      "properties": {
+        "url": {
+          "type": "string"
+        },
+        "exec": {
+          "type": "array"
+        },
+        "intervalMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "default": 8000
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "required": [
+        "label",
+        "url"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "title": {
+          "type": "string",
+          "description": "弹板标题，缺省同 label。"
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "弹板页面 / POST 目标 / 外部链接。"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "panel",
+            "post",
+            "external"
+          ],
+          "default": "panel",
+          "description": "panel：iframe 弹板；post：立即 POST url；external：新标签打开。flows/mode=flow 已于 M4 删除：多步流程走工具自己的 SDK runner。"
+        }
+      }
+    },
+    "report": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "exec"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "name": {
+          "type": "string"
+        },
+        "exec": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "description": "stdout 输出 JSON；形状由 shape 决定。"
+        },
+        "shape": {
+          "type": "string",
+          "enum": [
+            "status",
+            "list",
+            "markdown"
+          ],
+          "default": "status",
+          "description": "status：{status,summary,items?}；list：{items:[{title,at?,preview?}]}；markdown：{markdown}。"
+        },
+        "schedule": {
+          "type": "string",
+          "description": "cron 表达式（提示性；实际调度可由外部触发）。"
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "required": [
+        "id",
+        "exec"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$"
+        },
+        "description": {
+          "type": "string"
+        },
+        "exec": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "effect": {
+          "type": "string",
+          "enum": [
+            "read",
+            "write",
+            "external"
+          ],
+          "default": "read",
+          "description": "read 只读；write 写实例内数据；external 触及实例外（如安装端点到 ~/.codex）。"
+        },
+        "args": {
+          "type": "array",
+          "description": "调用方可传入的参数（POST body.args 对象）。positional 追加值，否则追加 --<name> <value>；值须整体匹配 pattern 且不得以 - 开头；未声明的键一律 400。",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "pattern"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9-]*$"
+              },
+              "pattern": {
+                "type": "string"
+              },
+              "required": {
+                "type": "boolean",
+                "default": false
+              },
+              "positional": {
+                "type": "boolean",
+                "default": false
+              },
+              "stdin": {
+                "type": "boolean",
+                "default": false,
+                "description": "true 时该值不进命令行，而写入子进程 stdin；适合正文这类长的、多行的、可能以 - 开头的内容。"
+              }
+            }
+          }
+        }
+      }
+    },
+    "delegation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "instructions",
+        "risk",
+        "result"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "在本扩展物内唯一；调用键为 <extensionId>/<id>。"
+        },
+        "instructions": {
+          "type": "string",
+          "minLength": 1,
+          "description": "交给会话的任务说明；调用方的 input 以 JSON 附在其后，作为数据而非指令。"
+        },
+        "risk": {
+          "enum": [
+            "auto",
+            "confirm"
+          ],
+          "description": "auto：会话交回结果即由调用方采纳；confirm：在观测区挂待确认，主人批准后才返回结果。"
+        },
+        "result": {
+          "type": "object",
+          "description": "结果的 JSON schema 子集（type: string/integer/number/boolean/array/object，支持 enum、maxLength、minimum、maximum、maxItems、required、properties）；会话经 butler_delegation_submit 提交时按它校验。"
+        },
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "会话除提交工具外可用的工具；缺省 [glob, grep]（只读）。"
+        },
+        "timeoutSec": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 1800,
+          "default": 300
+        }
+      }
+    },
+    "mcp": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transport",
+        "command"
+      ],
+      "properties": {
+        "transport": {
+          "const": "stdio",
+          "description": "唯一允许的接入方式：Host 经受管子进程的 stdin/stdout 说 MCP（按行 JSON-RPC）。"
+        },
+        "command": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "启动 stdio MCP 服务的命令向量；解析规则同 hosted.command（bun/python 走实例解释器，相对路径以清单目录为基准）。Host 注入 BUTLER_MCP_CHANNEL=butler-hub 与托管环境。"
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1,
+          "description": "工作目录，缺省为清单目录。"
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "namespace": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,23}$",
+          "not": {
+            "pattern": "__"
+          },
+          "description": "对外工具名前缀，缺省为 id（- 换成 _）。对外名为 <namespace>__<tool>，须满足 ^[A-Za-z0-9_-]{1,64}$，否则该工具不对外。命名空间冲突时后扫描到的提供方不注册。"
+        },
+        "timeoutSec": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 3600,
+          "default": 600,
+          "description": "单次 tools/call 上限；超时返回 isError 结果并向提供方发 notifications/cancelled。"
+        }
+      },
+      "description": "MCP 注册块（Butler Framework MCP 标准）。注册即声明：Host 从扫描结果派生，不另设登记表。"
+    }
+  }
+}

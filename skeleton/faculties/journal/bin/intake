@@ -1,0 +1,81 @@
+#!/usr/bin/env python
+"""intake — 观察记录入口：把一条观察写入 spool（并发安全），等 run 合并进 journal。
+
+用法：
+  intake --source <来源> [--type note|decision|fact|milestone|error|session] [--tag t1,t2] [--ref URI] -- 文本
+  echo 文本 | intake --source <来源>
+
+退出码：0 成功；2 参数/校验失败。
+"""
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _lib import (SPOOL_DIR, VALID_TYPES, append_jsonl, ensure_dirs,
+                  file_lock, utc_now)
+
+SOURCE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        prog="intake", description="向 Butler spool 写入一条观察（不直接进总账）")
+    ap.add_argument("--source", required=True,
+                    help="来源标识：小写字母数字连字符，如 workbuddy/codex/manual")
+    ap.add_argument("--type", default="note", choices=list(VALID_TYPES),
+                    help="观察类型，默认 note")
+    ap.add_argument("--tag", default="", help="逗号分隔标签")
+    ap.add_argument("--ref", default="", help="来源引用 URI，如 dsh://session#turn")
+    ap.add_argument("--workspace", default="", help="工作区标识")
+    ap.add_argument("--session-id", default="", help="会话标识")
+    ap.add_argument("--turn", type=int, help="回合编号")
+    ap.add_argument("--files", default="", help="文件列表（由 Host 使用单位分隔符传入）")
+    ap.add_argument("--tools", default="", help="工具列表（由 Host 使用单位分隔符传入）")
+    ap.add_argument("--commits", default="", help="提交列表（由 Host 使用单位分隔符传入）")
+    ap.add_argument("--failed", action="store_true", help="回合是否失败")
+    ap.add_argument("text", nargs="?", help="观察文本；缺省则读 stdin")
+    args = ap.parse_args()
+
+    text = (args.text if args.text is not None else sys.stdin.read()).strip()
+    if not text:
+        print("intake: 文本为空，拒绝写入", file=sys.stderr)
+        return 2
+    src = args.source.strip().lower()
+    if not SOURCE_RE.match(src):
+        print(f"intake: 非法 source {args.source!r}（须匹配 ^[a-z0-9][a-z0-9-]*$）",
+              file=sys.stderr)
+        return 2
+
+    ensure_dirs()
+    record = {
+        "ts": utc_now(),
+        "source": src,
+        "type": args.type,
+        "tags": [t.strip() for t in args.tag.split(",") if t.strip()],
+        "text": text,
+    }
+    if args.ref: record["ref"] = args.ref[:500]
+    if args.workspace: record["workspace"] = args.workspace[:500]
+    if args.session_id: record["sessionId"] = args.session_id[:240]
+    if args.turn is not None: record["turn"] = args.turn
+    for key, raw in (("filesTouched", args.files), ("toolsUsed", args.tools), ("gitCommits", args.commits)):
+        if raw:
+            record[key] = [item for item in raw.split("\x1f") if item][:100]
+    if args.failed: record["failed"] = True
+    spool_file = SPOOL_DIR / f"{src}.jsonl"
+    # Lock the stable source lock, never the data file: run atomically renames
+    # the current batch away while holding this same lock, so intake can only
+    # append to the new .jsonl after the handoff.
+    lock_file = SPOOL_DIR / f"{src}.lock"
+    with file_lock(lock_file):
+        append_jsonl(spool_file, [record])
+    print(f"queued: source={src} type={args.type} -> {spool_file.relative_to(SPOOL_DIR.parent)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,55 @@
+{
+  "name": "dsh-butler",
+  "version": "0.10.0",
+  "repository": { "type": "git", "url": "git+https://github.com/fegnze/dsh-butler.git" },
+  "publishConfig": { "access": "public" },
+  "description": "Butler as a DeepSeek Harness plugin: extension discovery (butler.json), process hosting bound to the DSH App lifecycle, run observation, and the Butler pages inside DSH",
+  "type": "module",
+  "exports": {
+    ".": "./dsh/index.js",
+    "./dsh": "./dsh/index.js",
+    "./client": "./dsh/client.js",
+    "./agent": "./dsh/agent.js",
+    "./consumer": "./dsh/consumer.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-sidebar-right"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "files": [
+    "assets/",
+    "cordis.patch.yml",
+    "dsh/",
+    "skeleton/",
+    "sdk/",
+    "spec/butler.schema.json",
+    "package.json",
+    "!**/__pycache__/**",
+    "!**/*.pyc",
+    "!**/*.pyo"
+  ],
+  "engines": {
+    "bun": ">=1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^26.3.0",
+    "bun-types": "^1.4.0",
+    "typescript": "5.9.3"
+  },
+  "license": "MIT"
+}

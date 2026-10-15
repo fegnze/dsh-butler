@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Butler panel — DSH 三接缝预览</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --bg-2: #f7f7f5;
+    --bg-3: #f1efe8;
+    --line: rgba(0,0,0,0.12);
+    --fg: #1c1c1a;
+    --fg-2: rgba(28,28,26,0.62);
+    --font: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: var(--font); color: var(--fg);
+    background: var(--bg-3); font-size: 13px; line-height: 1.6;
+  }
+  .note {
+    padding: 14px 20px; background: #fff; border-bottom: 1px solid var(--line);
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .note strong { font-weight: 500; font-size: 14px; }
+  .note span { color: var(--fg-2); font-size: 12px; }
+  .tag {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    background: #E1F5EE; color: #0F6E56;
+  }
+  .frame {
+    display: grid; grid-template-columns: 216px 1fr 320px;
+    height: calc(100vh - 57px); background: var(--bg);
+  }
+  .rail {
+    background: var(--bg-2); border-right: 1px solid var(--line);
+    padding: 14px 10px; display: flex; flex-direction: column; gap: 4px;
+  }
+  .rail .brand {
+    display: flex; align-items: center; gap: 9px; padding: 6px 10px 16px;
+    font-weight: 500; font-size: 14px;
+  }
+  .rail .dot { width: 18px; height: 18px; border-radius: 6px; background: #534AB7; }
+  .rail button {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 8px 10px; border: 0; border-radius: 8px; background: transparent;
+    font: inherit; color: var(--fg); cursor: pointer; text-align: left;
+  }
+  .rail button:hover { background: rgba(0,0,0,0.045); }
+  .rail button.on { background: #EEEDFE; color: #26215C; }
+  .rail .seam {
+    margin-top: auto; font-size: 11px; color: var(--fg-2);
+    padding: 10px; border-top: 1px solid var(--line); font-family: var(--mono);
+  }
+  .main { overflow-y: auto; padding: 26px 32px; }
+  .main h1 { font-size: 15px; font-weight: 500; margin: 0; }
+  .head { display: flex; align-items: center; gap: 12px; margin-bottom: 26px; }
+  .pill { font-size: 12px; padding: 2px 10px; border-radius: 999px; background: #FAEEDA; color: #854F0B; }
+  .ghost {
+    margin-left: auto; font: inherit; font-size: 12px; padding: 4px 12px;
+    border-radius: 8px; border: 1px solid var(--line); background: transparent; cursor: pointer;
+  }
+  h2 { font-size: 14px; font-weight: 500; margin: 0 0 12px; }
+  section { margin-bottom: 28px; }
+  ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 8px; }
+  .att {
+    display: flex; align-items: center; gap: 10px; padding: 10px 14px;
+    border-radius: 8px; background: #FAEEDA;
+  }
+  .att.fail { background: #FCEBEB; }
+  .att i { width: 6px; height: 6px; border-radius: 999px; background: #854F0B; }
+  .att.fail i { background: #A32D2D; }
+  .facts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .fact { padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; }
+  .fact b { display: block; font-size: 15px; font-weight: 500; }
+  .fact span { font-size: 12px; color: var(--fg-2); display: block; margin-bottom: 6px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row button {
+    font: inherit; font-size: 13px; padding: 8px 16px; border-radius: 8px;
+    border: 1px solid var(--line); background: transparent; cursor: pointer;
+  }
+  .row button:hover { background: rgba(0,0,0,0.04); }
+  .digest { padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px; }
+  .digest b { font-weight: 500; display: block; margin-bottom: 6px; }
+  .digest p { margin: 0; color: var(--fg-2); }
+  .dock { border-left: 1px solid var(--line); background: var(--bg-2); display: flex; flex-direction: column; }
+  .chips { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .chip {
+    font-size: 12px; padding: 5px 12px; border-radius: 8px;
+    background: #fff; border: 1px solid var(--line);
+  }
+  .chip.on { background: #EEEDFE; border-color: #AFA9EC; color: #26215C; }
+  .dockbody { padding: 16px 16px; overflow-y: auto; }
+  .dockbody h3 { font-size: 13px; font-weight: 500; margin: 0 0 10px; }
+  .cap { display: grid; gap: 6px; }
+  .cap button {
+    text-align: left; font: inherit; font-size: 13px; padding: 8px 12px;
+    border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer;
+  }
+  .cap button:hover { border-color: #AFA9EC; }
+  .ep { display: flex; align-items: center; gap: 8px; }
+  .ep i { width: 6px; height: 6px; border-radius: 999px; background: #1D9E75; }
+  .ep em { margin-left: auto; font-style: normal; font-size: 12px; color: var(--fg-2); }
+  pre {
+    margin: 0; font-family: var(--mono); font-size: 12px; line-height: 1.6;
+    white-space: pre-wrap; color: var(--fg-2);
+  }
+  .rec { padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  .rec span { font-size: 12px; color: var(--fg-2); display: block; margin-bottom: 4px; }
+  .seamtag {
+    font-family: var(--mono); font-size: 10px; color: #0F6E56;
+    background: #E1F5EE; padding: 2px 6px; border-radius: 4px; margin-left: 6px;
+  }
+</style>
+</head>
+<body>
+<div class="note">
+  <strong>Butler panel — 三接缝预览</strong>
+  <span class="tag">真实数据 · 127.0.0.1:37900</span>
+  <span>左栏 sidebar.panellist　·　中栏 main keyed slot　·　右栏 sidebarRightTabs　—— 均为 DSH 官方扩展点，未改一行上游源码</span>
+</div>
+
+<div class="frame">
+  <nav class="rail">
+    <div class="brand"><i class="dot"></i>DeepSeek Harness</div>
+    <button>会话</button>
+    <button>插件</button>
+    <button class="on">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+        <path d="M12 3.5 5 7v5c0 4.2 2.9 7.6 7 8.5 4.1-.9 7-4.3 7-8.5V7l-7-3.5Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>
+        <path d="M9.2 12.2 11.3 14.3 15 10.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Butler
+    </button>
+    <div class="seam">sidebar.panellist<br>id: butler · order: 5</div>
+  </nav>
+
+  <main class="main">
+    <div class="head">
+      <h1>Butler 简报</h1>
+      <span class="pill" id="status">warning</span>
+      <span class="seamtag">main keyed slot · key=butler</span>
+      <button class="ghost">刷新</button>
+    </div>
+
+    <section>
+      <h2>待你决定</h2>
+      <ul id="attention"></ul>
+    </section>
+
+    <section>
+      <h2>概览</h2>
+      <div class="facts" id="facts"></div>
+    </section>
+
+    <section>
+      <h2>快捷入口</h2>
+      <div class="row" id="actions"></div>
+    </section>
+
+    <section>
+      <h2>最新日报</h2>
+      <div class="digest" id="digest"></div>
+    </section>
+  </main>
+
+  <aside class="dock">
+    <div class="chips">
+      <span class="chip on">操作台</span>
+      <span class="chip">文件</span>
+      <span class="chip">引导</span>
+    </div>
+    <div class="dockbody">
+      <section>
+        <h3>可触发能力</h3>
+        <div class="cap" id="caps"></div>
+      </section>
+      <section>
+        <h3>端点</h3>
+        <ul id="eps"></ul>
+      </section>
+      <section>
+        <h3>doctor 输出</h3>
+        <pre id="doctor"></pre>
+      </section>
+      <section>
+        <h3>最近一条记录</h3>
+        <div class="rec" id="rec"></div>
+      </section>
+    </div>
+  </aside>
+</div>
+
+<script>
+const BASE = 'http://127.0.0.1:37900'
+
+function normalize(raw) {
+  const lines = (raw?.doctor?.output ?? '').split('\n').filter(Boolean)
+  const attention = []
+  for (const line of lines) {
+    if (line.startsWith('[WARN]')) attention.push({ level: 'warn', text: line.slice(6).trim() })
+    else if (line.startsWith('[FAIL]')) attention.push({ level: 'fail', text: line.slice(6).trim() })
+  }
+  for (const ep of raw?.endpoints ?? []) {
+    if (ep.status !== 'ok') attention.push({ level: 'fail', text: `端点 ${ep.id} 状态 ${ep.status}` })
+  }
+  return { lines, attention, raw }
+}
+
+function render(data, actions) {
+  const raw = data.raw
+  document.getElementById('status').textContent = raw.status
+
+  document.getElementById('attention').innerHTML = data.attention.length
+    ? data.attention.map(a => `<li class="att ${a.level === 'fail' ? 'fail' : ''}"><i></i>${a.text}</li>`).join('')
+    : '<li style="color:var(--fg-2)">暂无需要你处理的事项</li>'
+
+  const ok = (raw.endpoints ?? []).filter(e => e.status === 'ok').length
+  const d = raw.doctor ?? {}
+  document.getElementById('facts').innerHTML = [
+    ['端点健康', `${ok}/${(raw.endpoints ?? []).length}`],
+    ['通过 / 警告 / 失败', `${d.passed ?? 0} / ${d.warnings ?? 0} / ${d.failures ?? 0}`],
+    ['journal 条数', String(raw.journal?.records ?? 0)],
+    ['spool 待合并', String(raw.spool?.records ?? 0)],
+  ].map(([k, v]) => `<div class="fact"><span>${k}</span><b>${v}</b></div>`).join('')
+
+  document.getElementById('actions').innerHTML = actions.map(a => `<button>${a.label}</button>`).join('')
+  document.getElementById('caps').innerHTML = actions.map(a => `<button>${a.label}</button>`).join('')
+
+  document.getElementById('eps').innerHTML = (raw.endpoints ?? [])
+    .map(e => `<li class="ep"><i style="background:${e.status === 'ok' ? '#1D9E75' : '#E24B4A'}"></i>${e.id}<em>v${e.version}</em></li>`).join('')
+
+  document.getElementById('doctor').textContent = data.lines.join('\n')
+
+  const l = raw.journal?.latest
+  document.getElementById('rec').innerHTML = l
+    ? `<span>${l.source} · ${l.type}</span>${l.text}`
+    : '<span>暂无</span>'
+
+  const dg = raw.latestDigest
+  document.getElementById('digest').innerHTML = dg
+    ? `<b>${dg.name}</b><p>${(dg.preview ?? '').slice(0, 220)}…</p>`
+    : '<p>暂无日报</p>'
+}
+
+async function load() {
+  try {
+    const [b, q] = await Promise.all([
+      fetch(`${BASE}/api/butler`).then(r => r.json()),
+      fetch(`${BASE}/api/quick-actions`).then(r => r.json()),
+    ])
+    render(normalize(b), (q.actions ?? []).filter(a => a.enabled))
+  } catch (err) {
+    document.getElementById('attention').innerHTML =
+      `<li class="att fail"><i></i>无法连接 Dashboard（${err.message}）—— 请确认 127.0.0.1:37900 在运行</li>`
+  }
+}
+
+load()
+setInterval(load, 15000)
+</script>
+</body>
+</html>
