@@ -5,6 +5,7 @@
   "publishConfig": { "access": "public" },
   "description": "Butler as a DeepSeek Harness plugin: extension discovery (butler.json), process hosting bound to the DSH App lifecycle, run observation, and the Butler pages inside DSH",
   "type": "module",
+  "icon": "./icon.svg",
   "exports": {
     ".": "./dsh/index.js",
     "./dsh": "./dsh/index.js",
@@ -32,6 +33,7 @@
     "typecheck": "tsc --noEmit"
   },
   "files": [
+    "icon.svg",
     "assets/",
     "cordis.patch.yml",
     "dsh/",

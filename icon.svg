@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <linearGradient id="body" x1="48" y1="35" x2="202" y2="219" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#00E5FA"/><stop offset=".34" stop-color="#37BDFA"/><stop offset=".61" stop-color="#A2A5FA"/><stop offset=".82" stop-color="#EAC8FA"/><stop offset="1" stop-color="#FFF5F5"/>
+    </linearGradient>
+    <radialGradient id="pearl" cx="0" cy="0" r="1" gradientTransform="translate(171 159) rotate(44) scale(98 67)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFF1FF" stop-opacity=".88"/><stop offset="1" stop-color="#FFF1FF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="edge" x1="42" y1="40" x2="205" y2="222" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A3FFFF"/><stop offset=".45" stop-color="#65BFFF"/><stop offset=".74" stop-color="#ECD3FF"/><stop offset="1" stop-color="white"/>
+    </linearGradient>
+    <filter id="glass" x="-12%" y="-12%" width="124%" height="124%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="2.2" result="blur"/>
+      <feFlood flood-color="#7F9BFF" flood-opacity=".45"/><feComposite in2="blur" operator="in" result="glow"/>
+      <feOffset in="SourceAlpha" dx="3" dy="4" result="offset"/><feGaussianBlur in="offset" stdDeviation="5"/>
+      <feComposite in="SourceAlpha" operator="out" result="rim"/><feFlood flood-color="#F3FFFF" flood-opacity=".9"/><feComposite in2="rim" operator="in" result="light"/>
+      <feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/><feMergeNode in="light"/></feMerge>
+    </filter>
+    <path id="cat" d="M39 110 34 51Q32 27 53 35L92 57Q128 45 164 57L203 35Q224 27 222 51L217 110Q229 131 223 159C216 202 178 226 128 226S40 202 33 159Q27 131 39 110Z"/>
+  </defs>
+  <g filter="url(#glass)">
+    <use href="#cat" fill="url(#body)"/><use href="#cat" fill="url(#pearl)"/>
+    <use href="#cat" stroke="url(#edge)" stroke-width="2.5"/>
+    <path d="M78 134Q88 124 98 134M158 134Q168 124 178 134" stroke="#5F81D0" stroke-opacity=".58" stroke-width="9" stroke-linecap="round"/>
+    <path d="M121 157Q128 153 135 157L128 165Z" fill="#8A86CB" fill-opacity=".55"/>
+  </g>
+</svg>
