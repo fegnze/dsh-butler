@@ -1,6 +1,6 @@
 # dsh-butler
 
-[English](<README.md>) | 中文
+[English](<../README.md>) | 中文
 
 `dsh-butler` 是 DSH App 的 Butler 插件：浏览器界面和本地 host 同包发布。host 通过 DSH 的 `webServer` 与 `subprocess` 服务注册路由、扫描扩展物并托管进程；不启动独立 Guardian，不安装 LaunchAgent，也不依赖 Nowledge Mem。
 
@@ -31,11 +31,11 @@
 
 ## Host API
 
-公开 Host API 统一挂在 DSH 同源前缀 `/myspace-butler/api` 下；原客户端 `/myspace-butler/*` 路径保留为兼容别名。包括 `/health`、`/catalog`、`/services`、`/faculties`、`/runs` 与 `/quick-actions`；工具列表从 `/overview` 获取。工具与服务均支持 `/:kind/:id/{start,stop,restart}` 和 `/:kind/:id/log` SSE。请求只接受本机同源浏览器流量或本机 SDK 请求；公开扩展目录不包含命令和环境变量，配置编辑接口仅供受信本机调用。完整路径见 [HOST.md](HOST.md)。
+公开 Host API 统一挂在 DSH 同源前缀 `/myspace-butler/api` 下；原客户端 `/myspace-butler/*` 路径保留为兼容别名。包括 `/health`、`/catalog`、`/services`、`/faculties`、`/runs` 与 `/quick-actions`；工具列表从 `/overview` 获取。工具与服务均支持 `/:kind/:id/{start,stop,restart}` 和 `/:kind/:id/log` SSE。请求只接受本机同源浏览器流量或本机 SDK 请求；公开扩展目录不包含命令和环境变量，配置编辑接口仅供受信本机调用。完整路径见 [HOST.md](../HOST.md)。
 
-扩展物使用每个目录的 `butler.json`，完整字段见 [`spec/butler.schema.json`](spec/butler.schema.json)。SDK runner 使用 `BUTLER_HOST_URL` 发送事件；`BUTLER_GUARDIAN_URL` 只作为兼容旧扩展的别名，不是新的配置入口。
+扩展物使用每个目录的 `butler.json`，完整字段见 [`spec/butler.schema.json`](../spec/butler.schema.json)。SDK runner 使用 `BUTLER_HOST_URL` 发送事件；`BUTLER_GUARDIAN_URL` 只作为兼容旧扩展的别名，不是新的配置入口。
 
-**委托（delegations）**：tool / service 可在清单里声明需要判断的步骤，由 Host 交给新开的 Butler Session 完成（`POST /delegations`，阻塞到会话提交、超时或失败）。Host 是唯一驱动会话的地方：用 `sessionController.create` 建 butler 预设会话、以委托 id 作 requestId 调 `prompt` 投递、超时调 `cancel`。会话只能用声明的工具与 `butler_delegation_submit`，结果按声明的 schema 校验。`risk: confirm` 的结果在观测区挂待确认，`POST /runs/:runId/steps/:i/confirm` 走与卡片审核相同的主人专属门（`X-Butler-Review` + 同源 Origin 或已认证桌面转发）。DSH 不提供 `sessionController.prompt` 时 `/delegations` 返回 503，调用方走自己的 fallback。用法见 [sdk/README.md](sdk/README.md)。
+**委托（delegations）**：tool / service 可在清单里声明需要判断的步骤，由 Host 交给新开的 Butler Session 完成（`POST /delegations`，阻塞到会话提交、超时或失败）。Host 是唯一驱动会话的地方：用 `sessionController.create` 建 butler 预设会话、以委托 id 作 requestId 调 `prompt` 投递、超时调 `cancel`。会话只能用声明的工具与 `butler_delegation_submit`，结果按声明的 schema 校验。`risk: confirm` 的结果在观测区挂待确认，`POST /runs/:runId/steps/:i/confirm` 走与卡片审核相同的主人专属门（`X-Butler-Review` + 同源 Origin 或已认证桌面转发）。DSH 不提供 `sessionController.prompt` 时 `/delegations` 返回 503，调用方走自己的 fallback。用法见 [sdk/README.md](../sdk/README.md)。
 
 ## 统一 MCP 服务（Butler Framework MCP 标准）
 
@@ -49,7 +49,7 @@
 
 客户端只配一个地址：`http://127.0.0.1:19387/myspace-butler/api/mcp`（desktop profile 的 App 端口）。`GET /api/mcp/status` 查看提供方状态、对外工具名、命名空间冲突与被拒工具名。命名空间缺省为 id 中 `-` 换成 `_`；对外名须满足 `^[A-Za-z0-9_-]{1,64}$`，不满足的工具不对外并列在 status 里。提供方崩溃只影响自己（调用返回 `isError` 结果，5 秒后重试拉起），不影响其他提供方。安全边界同其余 Host API：仅 loopback，拒绝跨站 Origin（即 MCP 规范要求的 DNS rebinding 防护）。
 
-**统一 MCP 服务**：Butler 体系内的工具/服务若要提供 MCP，只在清单里声明 `mcp` 块（`transport:"stdio"` + `command`），由 Host 懒启动并聚合，经 `POST /myspace-butler/api/mcp`（Streamable HTTP）统一对外，工具名为 `<namespace>__<tool>`；**工具本身不得对外监听 MCP，也不直接注册给任何客户端**。Host 不 import 工具代码，工具只依赖 stdio MCP 与 `BUTLER_MCP_CHANNEL` 环境标记——两侧仅靠清单契约相连。客户端只需登记一个端点 `http://127.0.0.1:19387/myspace-butler/api/mcp`；状态见 `/api/mcp/status`。细节见 [HOST.md](HOST.md#mcp-统一服务)。
+**统一 MCP 服务**：Butler 体系内的工具/服务若要提供 MCP，只在清单里声明 `mcp` 块（`transport:"stdio"` + `command`），由 Host 懒启动并聚合，经 `POST /myspace-butler/api/mcp`（Streamable HTTP）统一对外，工具名为 `<namespace>__<tool>`；**工具本身不得对外监听 MCP，也不直接注册给任何客户端**。Host 不 import 工具代码，工具只依赖 stdio MCP 与 `BUTLER_MCP_CHANNEL` 环境标记——两侧仅靠清单契约相连。客户端只需登记一个端点 `http://127.0.0.1:19387/myspace-butler/api/mcp`；状态见 `/api/mcp/status`。细节见 [HOST.md](../HOST.md#mcp-统一服务)。
 
 ## 操作台显示偏好
 

@@ -1,6 +1,6 @@
 # dsh-butler
 
-English | [中文](<README.zh.md>)
+English | [中文](<docs/zh.md>)
 
 `dsh-butler` is the Butler plugin for the DSH App, shipping its browser UI and local host in one package. The host registers routes, scans extensions, and manages processes through DSH's `webServer` and `subprocess` services. It does not start a standalone Guardian, install a LaunchAgent, or depend on Nowledge Mem.
 
