@@ -41,11 +41,11 @@
 
 三层分工，彼此只靠「清单 + MCP 协议」相连：
 
-| 层 | 职责 | 不做什么 |
-| --- | --- | --- |
-| Framework（`spec/butler.schema.json`） | 定义 `mcp` 注册块：`transport: "stdio"`、`command`、可选 `cwd/env/namespace/timeoutSec`；仅 tool / service | 不允许 `http`/`url` 等自对外形态 |
-| Host（`src/host/mcp-hub.ts`） | 从扫描结果派生提供方（无第二份登记表）；按需经 `Spawner` 拉起 stdio 子进程；以 `<namespace>__<tool>` 聚合；在 `/myspace-butler/api/mcp` 提供无状态 Streamable HTTP；重扫时增删、空闲时重启；App 退出随 managed range 终止 | 不 import 扩展代码，不理解业务参数 |
-| 扩展物 | 实现一个 stdio MCP server | 不监听 MCP 端口、不调用 Host 内部接口；可凭 `BUTLER_MCP_CHANNEL=butler-hub` 拒绝被客户端直连 |
+| 层                                    | 职责                                                                                                                                                               | 不做什么                                                                 |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Framework（`spec/butler.schema.json`） | 定义 `mcp` 注册块：`transport: "stdio"`、`command`、可选 `cwd/env/namespace/timeoutSec`；仅 tool / service                                                                   | 不允许 `http`/`url` 等自对外形态                                              |
+| Host（`src/host/mcp-hub.ts`）          | 从扫描结果派生提供方（无第二份登记表）；按需经 `Spawner` 拉起 stdio 子进程；以 `<namespace>__<tool>` 聚合；在 `/myspace-butler/api/mcp` 提供无状态 Streamable HTTP；重扫时增删、空闲时重启；App 退出随 managed range 终止 | 不 import 扩展代码，不理解业务参数                                                |
+| 扩展物                                  | 实现一个 stdio MCP server                                                                                                                                            | 不监听 MCP 端口、不调用 Host 内部接口；可凭 `BUTLER_MCP_CHANNEL=butler-hub` 拒绝被客户端直连 |
 
 客户端只配一个地址：`http://127.0.0.1:19387/myspace-butler/api/mcp`（desktop profile 的 App 端口）。`GET /api/mcp/status` 查看提供方状态、对外工具名、命名空间冲突与被拒工具名。命名空间缺省为 id 中 `-` 换成 `_`；对外名须满足 `^[A-Za-z0-9_-]{1,64}$`，不满足的工具不对外并列在 status 里。提供方崩溃只影响自己（调用返回 `isError` 结果，5 秒后重试拉起），不影响其他提供方。安全边界同其余 Host API：仅 loopback，拒绝跨站 Origin（即 MCP 规范要求的 DNS rebinding 防护）。
 
@@ -153,6 +153,7 @@ Host 自己目睹的事实同样经 `intake --source butler` 进 spool，`ref` �
 
 ## M4 决定
 
+
 - WorkBuddy 与 git 端点已在 M1B 实现，见 journal faculty README 的 External endpoints。
 - `nowledge-bridge` 延期：等 knowledge 累积后再以 faculty 命令立项，不另起常驻工具。
 - 清单 `flows[]` 与动作 `mode: "flow"` 已删除。多步流程由工具自己用 `sdk/` runner 实现，经普通动作触发。历史理由与真机验收记录保存在维护者本地 Plan handoff 文档，不随公开包发布。
@@ -161,11 +162,11 @@ Host 自己目睹的事实同样经 `intake --source butler` 进 spool，`ref` �
 
 插件 bundle patch（`cordis.patch.yml`）声明受限预设 `butler`。只有该预设挂载子导出 `dsh-butler/agent`（`dsh/agent.js` → 构建产物 `dsh/agent-host.js`），其中蒸馏与旧兼容工具只在 butler 会话可见；根级 consumer 独立注册 `butler_search/read/report_session`，普通会话无需挂载管家 persona：
 
-| 工具 | 背后命令 |
-| --- | --- |
-| `butler_journal_read` | `distill --json`（只读；只给观察记录，Git 提交与会话回合不在其中） |
-| `butler_distill_advance` | `distill --advance` |
-| `butler_candidate` | `memory candidate-mark`（只打「建议升级」标记） |
+| 工具                       | 背后命令                                        |
+| ------------------------ | ------------------------------------------- |
+| `butler_journal_read`    | `distill --json`（只读；只给观察记录，Git 提交与会话回合不在其中） |
+| `butler_distill_advance` | `distill --advance`                         |
+| `butler_candidate`       | `memory candidate-mark`（只打「建议升级」标记）         |
 
 - 预设另只含 `dsh-persona`、只读 `dsh-tool-fs-search` 与 `dsh-tool-ask-user`。不含 bash、`dsh-tool-fs`（自带写入）、web、委派或 cordis 编辑。
 - 没有写卡、改资料的工具：模型只能给观察记录打「建议升级」标记，升级由主人在记忆页确认（Host 确认命令）。
@@ -178,13 +179,13 @@ Host 自己目睹的事实同样经 `intake --source butler` 进 spool，`ref` �
 
 简报页「自动化任务 → 登记」调用 Host `POST /automations`，在 DSH 自动化任务中登记 1 个 cron 任务（蒸馏），时区 `Asia/Shanghai`，并清掉已退役的日报/周报/周检任务。任务定义和提示词以 `src/host/automations.ts` 为准，随插件版本维护。
 
-| 标题 | 规则 | 做什么 |
-| --- | --- | --- |
+| 标题          | 规则    | 做什么                                                                                              |
+| ----------- | ----- | ------------------------------------------------------------------------------------------------ |
 | 蒸馏 · Butler | 每小时整点 | `butler_distill_claim` → 检索正式卡 → `butler_candidate_submit` 完整候选 → `butler_distill_complete` 确认覆盖 |
 
 新版定义仅在重新登记后替换实际任务；只改源码不会自动修改已安装任务。完整参数以工具声明为准，零候选必须说明原因，处理失败不得确认覆盖。
 
-- DSH 任务绑定会话，到点后把提示词投递到该会话。任务运行在实例根目录新建的 `butler` 预设会话里，会话经 `workspaceRegistry` 挂入 Butler 工作区（`session.create` 只给 `cwd` 会得到不属于任何工作区的游离会话）；已有的游离任务会话在登记时补挂入工作区，找不到该服务则退回按目录创建，因此只能使用 butler_* 工具。会话变长时由 DSH 自动压缩。
+- DSH 任务绑定会话，到点后把提示词投递到该会话。任务运行在实例根目录新建的 `butler` 预设会话里，会话经 `workspaceRegistry` 挂入 Butler 工作区（`session.create` 只给 `cwd` 会得到不属于任何工作区的游离会话）；已有的游离任务会话在登记时补挂入工作区，找不到该服务则退回按目录创建，因此只能使用 butler\_* 工具。会话变长时由 DSH 自动压缩。
 - 按标题幂等：内容一致的保留；提示词或规则有变化的删除重建；不带 `· Butler` 后缀的任务不碰。重复点击是安全的。
 - 日报、周报、周检已退役：简报页的「最近动态」实时给出同样的事实，不再另写一份报告。登记时按旧标题（`日报/周报/周检 · Butler`）删除已装的旧任务；`self/digests/` 里已有的报告原样保留。
 - `schedule`/`sessionController` 是可选的 App 服务。Host 通过 `ctx.get` 按请求读取，不写进 `inject`，因为 cordis 会把 inject 里的每一项都视为必需。未启用 `dsh-experimental-schedule-bundle` 时，路由返回 503，Butler 其余功能照常。

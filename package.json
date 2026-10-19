@@ -1,6 +1,6 @@
 {
   "name": "dsh-butler",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "repository": { "type": "git", "url": "git+https://github.com/fegnze/dsh-butler.git" },
   "publishConfig": { "access": "public" },
   "description": "Butler as a DeepSeek Harness plugin: extension discovery (butler.json), process hosting bound to the DSH App lifecycle, run observation, and the Butler pages inside DSH",
