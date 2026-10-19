@@ -4,6 +4,10 @@
 
 `dsh-butler` 是 DSH App 的 Butler 插件：浏览器界面和本地 host 同包发布。host 通过 DSH 的 `webServer` 与 `subprocess` 服务注册路由、扫描扩展物并托管进程；不启动独立 Guardian，不安装 LaunchAgent，也不依赖 Nowledge Mem。
 
+## DSH 兼容性
+
+兼容声明仅限 DSH **0.2.0-rc.2 或 0.2.1-rc.2**。`engines.dsh` 与可选 peer `@deepseek-ai/dsh-app-boot` 均精确使用 `0.2.0-rc.2 || 0.2.1-rc.2`；可选 peer 用来描述宿主，不会额外安装一套 DSH 运行时。不声明兼容后续预发布版本。升级 DSH 后须重新检查 Host 服务、会话事件与 Client Slots；元数据与本地测试不能替代真实 App 验收。
+
 ## 工作目录
 
 插件配置支持 `workdir`，未配置时使用 `~/.dsh/butler/`。首次加载时会复制插件内置的通用 skeleton；已存在 `butler.json` 的目录不会被覆盖。个人数据、解释器配置和扩展物属于实例工作目录，可整体迁移；插件不预设个人工作区。

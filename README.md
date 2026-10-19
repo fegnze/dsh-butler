@@ -4,6 +4,10 @@ English | [中文](<docs/zh.md>)
 
 `dsh-butler` is the Butler plugin for the DSH App, shipping its browser UI and local host in one package. The host registers routes, scans extensions, and manages processes through DSH's `webServer` and `subprocess` services. It does not start a standalone Guardian, install a LaunchAgent, or depend on Nowledge Mem.
 
+## DSH compatibility
+
+The compatibility declaration is limited to DSH **0.2.0-rc.2 or 0.2.1-rc.2**. Both `engines.dsh` and the optional peer `@deepseek-ai/dsh-app-boot` use exactly `0.2.0-rc.2 || 0.2.1-rc.2`; the optional peer describes the host without installing another DSH runtime. It does not claim compatibility with later prereleases. Recheck Host services, session events, and Client Slots after a DSH upgrade; metadata and local tests do not replace live App acceptance.
+
 ## Working directory
 
 Plugin configuration accepts `workdir`, defaulting to `~/.dsh/butler/`. On first load, the plugin copies its built-in generic skeleton; a directory that already contains `butler.json` is not overwritten. Personal data, interpreter configuration, and extensions belong to the instance working directory and can be migrated together. The plugin does not assume a personal workspace.

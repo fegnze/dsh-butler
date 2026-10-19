@@ -1,6 +1,6 @@
 {
   "name": "dsh-butler",
-  "version": "0.10.3",
+  "version": "0.10.4",
   "repository": { "type": "git", "url": "git+https://github.com/fegnze/dsh-butler.git" },
   "publishConfig": { "access": "public" },
   "description": "Butler as a DeepSeek Harness plugin: extension discovery (butler.json), process hosting bound to the DSH App lifecycle, run observation, and the Butler pages inside DSH",
@@ -41,13 +41,21 @@
     "sdk/",
     "spec/butler.schema.json",
     "package.json",
+    "README.md",
     "docs/zh.md",
     "!**/__pycache__/**",
     "!**/*.pyc",
     "!**/*.pyo"
   ],
   "engines": {
-    "bun": ">=1.1"
+    "bun": ">=1.1",
+    "dsh": "0.2.0-rc.2 || 0.2.1-rc.2"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-app-boot": "0.2.0-rc.2 || 0.2.1-rc.2"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-app-boot": { "optional": true }
   },
   "devDependencies": {
     "@types/node": "^26.3.0",

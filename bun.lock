@@ -4,6 +4,10 @@
   "workspaces": {
     "": {
       "name": "dsh-butler",
+      "peerDependencies": {
+        "@deepseek-ai/dsh-app-boot": "0.2.0-rc.2 || 0.2.1-rc.2",
+      },
+      "optionalPeers": ["@deepseek-ai/dsh-app-boot"],
       "devDependencies": {
         "@types/node": "^26.3.0",
         "bun-types": "^1.4.0",
