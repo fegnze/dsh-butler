@@ -167,6 +167,7 @@ const jsx = { jsx: (t, p) => ({ t, p }), jsxs: (t, p) => ({ t, p }), Fragment: '
 const exports_ = captured.factory((name) => {
   if (name === 'react') return React
   if (name === 'react/jsx-runtime') return jsx
+  if (name === 'react-dom') return { createPortal: (node) => node }
   throw new Error('unexpected peer: ' + name)
 })
 for (const name of ['apply', 'inject']) {

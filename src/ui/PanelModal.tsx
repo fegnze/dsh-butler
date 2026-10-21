@@ -16,6 +16,7 @@
  */
 
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 
 /**
  * Tell the embedded page which theme to draw.
@@ -141,7 +142,11 @@ export function PanelModal({ panel, onClose, t }) {
   const palette = panelPalette(theme)
   const dimensions = panelDimensions(panel.size)
 
-  return (
+  // Portal to the end of <body>. Chromium composites `-webkit-app-region` in
+  // DOM order, not z-order: rendered inline, the host's later drag strips
+  // (window title bar) override this header's `no-drag` button and swallow
+  // the click on 关闭. Being the last node puts our regions on top.
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -211,6 +216,7 @@ export function PanelModal({ panel, onClose, t }) {
           style={{ flex: 1, width: '100%', border: 'none', background: 'transparent' }}
         />
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }
